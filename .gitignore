@@ -1,0 +1,201 @@
+# =================================================================
+# IMBIO — .gitignore raíz
+# =================================================================
+# Este archivo evita que archivos innecesarios (binarios, deps,
+# secretos, artefactos de build) se suban al repo.
+#
+# Estructura:
+#   - Repo raíz: frontend (Vite + React)
+#   - server/:   backend (Fastify + Prisma)
+#   - src-tauri/: shell de escritorio (Rust + Tauri)
+# =================================================================
+
+
+# =================================================================
+# 1. Dependencias
+# =================================================================
+node_modules/
+**/node_modules/
+
+# =================================================================
+# 2. Build artifacts
+# =================================================================
+# Frontend (Vite)
+dist/
+dist-ssr/
+*.local
+
+# Backend (TypeScript compilado)
+server/dist/
+server/tsconfig.tsbuildinfo
+
+# Tauri (binarios Rust)
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/gen/
+
+# =================================================================
+# 3. Secretos y configuración local
+# =================================================================
+# Variables de entorno con datos sensibles
+.env
+.env.local
+.env.*.local
+server/.env
+server/.env.local
+server/.env.*.local
+
+# Mantener los .env.example (plantillas sin secretos)
+!.env.example
+!server/.env.example
+
+# Cache de Prisma
+server/.prisma/
+
+# =================================================================
+# 4. Datos de usuario (uploads)
+# =================================================================
+# Imágenes y archivos subidos por los usuarios (todo el contenido
+# de las subcarpetas, pero NO los .gitkeep)
+server/uploads/consumibles/*
+server/uploads/personal/*
+server/uploads/resguardos/*
+
+# Mantener la estructura de carpetas con .gitkeep
+!server/uploads/consumibles/.gitkeep
+!server/uploads/personal/.gitkeep
+!server/uploads/resguardos/.gitkeep
+
+# =================================================================
+# 5. Archivos de prueba y generados
+# =================================================================
+# PDFs/imágenes de prueba que se generan en /tmp (referenciados
+# desde código de pruebas) — no están en el repo, pero por si
+# alguien los mueve a una carpeta del proyecto:
+test-output/
+test-output/**/*
+
+# Capturas de pantalla / fixtures
+**/__screenshots__/
+**/__fixtures__/images/
+
+# Logs de Playwright/Cypress/Vitest
+playwright-report/
+playwright/.cache/
+cypress/videos/
+cypress/screenshots/
+coverage/
+
+# =================================================================
+# 6. Sistema operativo
+# =================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# =================================================================
+# 7. Editores / IDEs
+# =================================================================
+# VSCode
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.recommended
+
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+\#*\#
+.\#*
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# =================================================================
+# 8. Logs
+# =================================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+server/logs/
+
+# =================================================================
+# 9. Cachés varios
+# =================================================================
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.turbo/
+
+# Tauri build cache
+src-tauri/.tauri/
+
+# =================================================================
+# 10. Archivos temporales del sistema
+# =================================================================
+*.tmp
+*.temp
+*.swp
+*.bak
+*.orig
+*.rej
+*~
+
+# =================================================================
+# 11. Coverage / reports
+# =================================================================
+coverage/
+*.lcov
+.nyc_output/
+
+# =================================================================
+# 12. node-gyp / build
+# =================================================================
+# Si alguna vez se compila algo en node
+build/Release/
+*.gyp
+*.lock
+
+# =================================================================
+# 13. Archivos específicos del SO
+# =================================================================
+# Windows
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.AppleDouble
+.LSOverride
+._.DS_Store
+.fseventsd
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+# =================================================================
+# 14. Otros
+# =================================================================
+# Carpetas vacías que querés mantener
+!.vscode/
+!server/uploads/
