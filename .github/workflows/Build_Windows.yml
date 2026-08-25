@@ -86,7 +86,17 @@ jobs:
         run: npx prisma generate --schema=server/prisma/schema.prisma
 
       # ------------------------------------------------------------
-      # 7. Verificar versión (útil para debug en logs de CI)
+      # 7. Construir bundle del servidor (para el instalador)
+      #    El instalador NSIS incluye los scripts PowerShell que
+      #    instalan el server como servicio de Windows. El bundle
+      #    NO se incluye en el .exe (pesa ~100MB y se descarga
+      #    al instalar en modo servidor). Ver installer/README.md.
+      # ------------------------------------------------------------
+      - name: 📦 Build server bundle (opcional, solo si cambió el server)
+        run: node installer/build-server-bundle.mjs || echo "⚠️ Bundle del server no se pudo construir, continuando"
+
+      # ------------------------------------------------------------
+      # 8. Verificar versión (útil para debug en logs de CI)
       # ------------------------------------------------------------
       - name: ℹ️  Show versions
         run: |
@@ -96,19 +106,21 @@ jobs:
           cargo --version
 
       # ------------------------------------------------------------
-      # 8. Type-check del frontend (bloquea si falla)
+      # 9. Type-check del frontend (bloquea si falla)
       # ------------------------------------------------------------
       - name: 🟦 TypeScript check
         run: npx tsc --noEmit
 
       # ------------------------------------------------------------
-      # 9. Build de Tauri (vite build + cargo build --release + bundle)
+      # 10. Build de Tauri (vite build + cargo build --release + bundle)
+      #     Los scripts de installer/ se incluyen automáticamente
+      #     como resources del bundle (ver tauri.conf.json).
       # ------------------------------------------------------------
       - name: 🔨 Build Tauri app
         run: npm run tauri build -- --verbose
 
       # ------------------------------------------------------------
-      # 10. Listar artefactos (para verificar en logs)
+      # 11. Listar artefactos (para verificar en logs)
       # ------------------------------------------------------------
       - name: 📋 List build artifacts
         shell: bash
@@ -119,7 +131,7 @@ jobs:
           \) 2>/dev/null || echo "⚠️ No se encontraron instaladores"
 
       # ------------------------------------------------------------
-      # 11. Subir instaladores como artefactos descargables
+      # 12. Subir instaladores como artefactos descargables
       #     (visibles 30 días en la pestaña Actions)
       # ------------------------------------------------------------
       - name: ⬆️  Upload Windows installers
@@ -133,7 +145,7 @@ jobs:
           retention-days: 30
 
       # ------------------------------------------------------------
-      # 12. Si es un tag, adjuntar instaladores al Release (draft)
+      # 13. Si es un tag, adjuntar instaladores al Release (draft)
       #     Permiso de escritura solo para este step
       # ------------------------------------------------------------
       - name: 📦 Create GitHub Release

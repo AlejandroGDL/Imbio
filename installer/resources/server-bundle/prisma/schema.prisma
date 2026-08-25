@@ -1,0 +1,730 @@
+// IMBIO — Sistema de Gestión
+// Schema de base de datos PostgreSQL
+//
+// Diseño:
+// - Trámites: catálogo configurable con campos dinámicos en JSON.
+//   Cada trámite define su propio formulario y precio.
+// - Solicitudes: el caso concreto de un ciudadano pidiendo un trámite.
+//   Guarda los valores de los campos dinámicos en `datos` (JSON).
+// - Pago + Autorización: fases del flujo (registro → pago → autorización).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =================================================================
+// Enums
+// =================================================================
+
+enum CategoriaTramite {
+  PERMISO
+  SERVICIO
+  SANCION
+}
+
+enum EstadoSolicitud {
+  REGISTRADA       // Se creó la solicitud
+  PENDIENTE_PAGO   // Se generó el memorándum, esperando pago
+  PAGADA           // El ciudadano pagó (tiene N° de folio)
+  EN_REVISION      // El técnico está revisando
+  AUTORIZADA       // Se generó la autorización final
+  RECHAZADA        // Fue rechazada
+  CANCELADA        // Cancelada por el ciudadano o el sistema
+}
+
+enum TipoPago {
+  MEMORANDUM
+  EFECTIVO
+  TRANSFERENCIA
+  OTRO
+}
+
+enum RolUsuario {
+  ADMIN
+  OPERADOR
+  TECNICO
+}
+
+enum TipoCorrespondencia {
+  ENTRADA
+  SALIDA
+}
+
+enum TipoDocumentoCorrespondencia {
+  MEMORANDUM
+  OFICIO
+}
+
+enum StatusCorrespondencia {
+  PENDIENTE
+  ATENDIDO
+  ARCHIVADO
+}
+
+enum TipoPersonal {
+  CONFIANZA
+  SINDICALIZADO
+}
+
+enum TipoIncidencia {
+  FALTA
+  JUSTIFICANTE
+  RETARDO
+  PERMISO_SIN_GOCE_SUELDO
+  PERMISO_CON_GOCE_SUELDO
+}
+
+enum Unidad {
+  PIEZA
+  LITRO
+  GALON
+  KILO
+  CAJA
+  ROLLO
+  PAQUETE
+}
+
+enum TipoMovimientoConsumible {
+  ENTRADA  // Suma al stock (proviene de una requisición surtida)
+  SALIDA   // Resta del stock (entrega a personal)
+}
+
+enum EstadoResguardo {
+  EN_BODEGA    // disponible, sin asignar
+  ASIGNADO     // con un empleado
+  REPARACION   // en reparación
+  BAJA         // dado de baja
+}
+
+// =================================================================
+// Ciudadanos
+// =================================================================
+
+model Ciudadano {
+  id              Int       @id @default(autoincrement())
+  curp            String?   @unique @db.VarChar(18)
+  nombre          String
+  apellidoPaterno String
+  apellidoMaterno String?
+  telefono        String?   @db.VarChar(20)
+  email           String?   @db.VarChar(120)
+  direccion       String?
+  fechaNacimiento DateTime? @db.Date
+  notas           String?
+  activo          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  solicitudes Solicitud[]
+
+  @@index([curp])
+  @@index([apellidoPaterno, apellidoMaterno, nombre])
+}
+
+// =================================================================
+// Trámites (catálogo)
+// =================================================================
+
+model Tramite {
+  id          Int             @id @default(autoincrement())
+  codigo      String          @unique @db.VarChar(50)
+  nombre      String
+  descripcion String?
+  categoria   CategoriaTramite
+  // Definición de los campos dinámicos del formulario. Ver:
+  // prisma/seed.ts → TramiteSeed para la estructura.
+  campos      Json
+  // Precio base en MXN. Para trámites con precio variable
+  // (poda, derribo, contenedores), se calcula según campos.
+  precioBase  Decimal?        @db.Decimal(10, 2)
+  // Regla opcional para cálculo de precio variable. Estructura JSON:
+  // { tipo: "rango", campo: "altura", rangos: [{min, max, precio}, ...] }
+  reglaPrecio Json?
+  // Si requiere memorándum de pago antes de continuar.
+  requierePago Boolean        @default(true)
+  activo      Boolean         @default(true)
+  orden       Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  solicitudes Solicitud[]
+
+  @@index([categoria, activo])
+}
+
+// =================================================================
+// Solicitudes
+// =================================================================
+
+model Solicitud {
+  id              Int             @id @default(autoincrement())
+  // Folio legible: ej. "SOL-2026-000123"
+  folio           String          @unique
+  ciudadanoId     Int
+  tramiteId       Int
+  estado          EstadoSolicitud @default(REGISTRADA)
+  // Valores capturados de los campos dinámicos del trámite.
+  datos           Json
+  // Precio final cobrado (puede diferir de precioBase si hay regla).
+  precioFinal     Decimal?        @db.Decimal(10, 2)
+  // Fecha de la solicitud original.
+  fechaSolicitud  DateTime        @default(now())
+  // Fecha tentativa / prometida de atención.
+  fechaAtencion   DateTime?
+  // Notas internas (no se imprimen en la autorización).
+  observaciones   String?
+  // Quién la capturó (usuario del sistema).
+  registradoPorId Int?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  ciudadano    Ciudadano     @relation(fields: [ciudadanoId], references: [id], onDelete: Restrict)
+  tramite      Tramite       @relation(fields: [tramiteId], references: [id], onDelete: Restrict)
+  registradoPor Usuario?     @relation(fields: [registradoPorId], references: [id], onDelete: SetNull)
+  pago         Pago?
+  autorizacion Autorizacion?
+
+  @@index([ciudadanoId])
+  @@index([tramiteId])
+  @@index([estado])
+  @@index([fechaSolicitud])
+}
+
+// =================================================================
+// Pagos
+// =================================================================
+
+model Pago {
+  id            Int      @id @default(autoincrement())
+  solicitudId   Int      @unique
+  // N° de folio que el ciudadano trae del banco/recaudación.
+  folioPago     String   @db.VarChar(80)
+  tipo          TipoPago @default(MEMORANDUM)
+  monto         Decimal  @db.Decimal(10, 2)
+  fechaPago     DateTime
+  // Banco o lugar donde se pagó.
+  lugarPago     String?
+  observaciones String?
+  registradoPorId Int?
+  createdAt     DateTime @default(now())
+
+  solicitud     Solicitud @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  registradoPor Usuario?  @relation(fields: [registradoPorId], references: [id], onDelete: SetNull)
+
+  @@index([folioPago])
+  @@index([fechaPago])
+}
+
+// =================================================================
+// Autorizaciones
+// =================================================================
+
+model Autorizacion {
+  id                 Int       @id @default(autoincrement())
+  solicitudId        Int       @unique
+  // N° de autorización legible: ej. "AUT-2026-000123"
+  numeroAutorizacion String    @unique
+  fechaEmision       DateTime  @default(now())
+  fechaVencimiento   DateTime?
+  // Técnico que firma/autoriza.
+  emitidoPorId       Int?
+  // Texto legal/condiciones de la autorización.
+  considerandos      String?
+  observaciones      String?
+  // Si se generó un PDF del documento.
+  documentoPdf       Bytes?
+  createdAt          DateTime  @default(now())
+
+  solicitud  Solicitud @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  emitidoPor Tecnico?  @relation(fields: [emitidoPorId], references: [id], onDelete: SetNull)
+
+  @@index([numeroAutorizacion])
+  @@index([fechaEmision])
+}
+
+// =================================================================
+// Técnicos (los que firman autorizaciones)
+// =================================================================
+
+model Tecnico {
+  id           Int       @id @default(autoincrement())
+  nombre       String
+  cargo        String
+  departamento String?
+  cedula       String?   @db.VarChar(30)
+  email        String?   @db.VarChar(120)
+  telefono     String?   @db.VarChar(20)
+  firma        String?   // ruta a la imagen de la firma
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  autorizaciones Autorizacion[]
+}
+
+// =================================================================
+// Usuarios del sistema (operadores/admin)
+// =================================================================
+// Por ahora solo el modelo — la autenticación se implementa en
+// una iteración posterior.
+
+model Usuario {
+  id           Int        @id @default(autoincrement())
+  username     String     @unique @db.VarChar(50)
+  passwordHash String
+  nombre       String
+  email        String?    @unique @db.VarChar(120)
+  rol          RolUsuario @default(OPERADOR)
+  activo       Boolean    @default(true)
+  ultimoAcceso DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  solicitudesRegistradas Solicitud[]
+  pagosRegistrados       Pago[]
+}
+
+// =================================================================
+// Áreas Verdes (reservas de parques para eventos)
+// =================================================================
+// Registro de eventos que se realizan en las áreas verdes del
+// municipio. Es un CRUD independiente del flujo de Trámites /
+// Solicitudes. El catálogo de áreas verdes válidas se valida en
+// el backend (ver AREAS_VERDES_OPCIONES en routes/areas-verdes.ts).
+model AreaVerde {
+  id                Int      @id @default(autoincrement())
+  // Nombre del área verde, tomado de la lista predefinida.
+  areaVerde         String   @db.VarChar(80)
+  // Ubicación específica dentro del área (esquina, sector, etc.).
+  // Aparece en el PDF de permiso como "Ubicación".
+  ubicacion         String?  @db.VarChar(200)
+  // Persona o institución que solicita el espacio.
+  usuario           String   @db.VarChar(160)
+  tipoEvento        String   @db.VarChar(120)
+  // Fecha del evento.
+  fecha             DateTime @db.Date
+  // Horario: "HH:MM" (formato 24h).
+  horaInicio        String   @db.VarChar(5)
+  horaFin           String   @db.VarChar(5)
+  // Hora de montaje (cuando llegan a armar) — aparece en el PDF.
+  // Nullable para no romper las filas existentes; el endpoint
+  // valida que esté presente al crear.
+  horaMontaje       String?  @db.VarChar(5)
+  // Hora de desmontaje (cuando retiran todo) — aparece en el PDF.
+  horaDesmontaje    String?  @db.VarChar(5)
+  responsable       String   @db.VarChar(160)
+  telefono          String?  @db.VarChar(20)
+  observaciones     String?
+  // Folio del permiso (formato "CC-AV-####"). Se asigna en la
+  // primera vez que se genera el PDF (lazy generation).
+  folioPermiso      String?  @unique @db.VarChar(20)
+  // Borrado lógico (default true; en DELETE pasamos a false).
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([fecha])
+  @@index([areaVerde])
+  @@index([activo])
+}
+
+// =================================================================
+// Correspondencia (entrada y salida de oficios/memorándums)
+// =================================================================
+// Registro de documentos que entran o salen del IMBIO. Cada
+// documento tiene un tipo (Entrada/Salida), tipo de documento
+// (Memorándum/Oficio), número, fecha, remitente, destinatario,
+// asunto y un status que se puede modificar después de creado
+// (Pendiente → Atendido → Archivado).
+model Correspondencia {
+  id             Int                         @id @default(autoincrement())
+  tipo           TipoCorrespondencia
+  tipoDocumento  TipoDocumentoCorrespondencia
+  // Número del documento (folio que trae).
+  numero         String                      @db.VarChar(80)
+  fecha          DateTime                    @db.Date
+  // Para ENTRADA: el que envía desde fuera. Para SALIDA: el IMBIO
+  // que firma. Siempre se llena (la lógica del lado aplica).
+  remitente      String                      @db.VarChar(200)
+  destinatario   String                      @db.VarChar(200)
+  asunto         String                      @db.VarChar(300)
+  observaciones  String?
+  // Status modificable. Default PENDIENTE al crear.
+  status         StatusCorrespondencia       @default(PENDIENTE)
+  // ===== Notificación =====
+  // Si el documento requiere una respuesta. Si true,
+  // fechaMaximaRespuesta es obligatoria.
+  ocupaRespuesta           Boolean   @default(false)
+  fechaMaximaRespuesta     DateTime? @db.Date
+  // Si requiere asistir a un evento (reunión, junta, etc.).
+  // Si true, fechasEvento debe contener al menos 1 día.
+  // Los días se guardan como una lista (no como rango) porque el
+  // usuario puede necesitar días específicos no consecutivos.
+  asisteAEvento            Boolean   @default(false)
+  fechasEvento             DateTime[] @default([])
+  // Personal del IMBIO que debe asistir al evento (opcional, varios).
+  // Solo aplica cuando asisteAEvento = true.
+  asistentesIds            Int[]      @default([])
+  // Borrado lógico.
+  activo         Boolean                     @default(true)
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  @@index([fecha])
+  @@index([tipo])
+  @@index([status])
+  @@index([activo])
+  @@index([ocupaRespuesta, fechaMaximaRespuesta])
+  @@index([asisteAEvento])
+}
+
+// =================================================================
+// Personal (empleados del IMBIO)
+// =================================================================
+// Registro del personal que labora en el IMBIO. Es un CRUD
+// independiente. El formulario se organiza en tabs para crecer en
+// el futuro (licencia de manejo, puesto, próximos: contacto de
+// emergencia, documentos, etc.).
+model Personal {
+  id                       Int       @id @default(autoincrement())
+  nombre                   String    @db.VarChar(80)
+  apellidos                String    @db.VarChar(160)
+  // CURP única. Opcional porque el dato puede no estar disponible
+  // al momento del alta, pero se recomienda capturarlo.
+  curp                     String?   @unique @db.VarChar(18)
+  fechaNacimiento          DateTime? @db.Date
+  telefono                 String?   @db.VarChar(20)
+  domicilio                String?
+  sabeManejar              Boolean   @default(false)
+  tieneLicencia            Boolean   @default(false)
+  fechaExpedicionLicencia  DateTime? @db.Date
+  fechaExpiracionLicencia  DateTime? @db.Date
+  puesto                   String    @db.VarChar(120)
+  fechaIngreso             DateTime  @db.Date
+  tipo                     TipoPersonal
+  // Foto de perfil (opcional). Se guarda como "/uploads/personal/{filename}".
+  foto                     String?
+  // Borrado lógico.
+  activo                   Boolean   @default(true)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  // Relaciones
+  incidencias              Incidencia[]
+  vacaciones               Vacacion[]
+  diasEconomicos           DiaEconomico[]
+  injustificantes          Injustificante[]
+  consumiblesRecibidos     ConsumibleMovimiento[]
+  resguardosActuales       Resguardo[]      @relation("ResguardoPersonalActual")
+  resguardosHistorial      ResguardoHistorial[]
+
+  @@index([apellidos, nombre])
+  @@index([tipo])
+  @@index([activo])
+}
+
+// =================================================================
+// Incidencias (asistencia del personal)
+// =================================================================
+// Cada registro es una incidencia laboral de un empleado: faltas,
+// retardos, permisos, etc. Vive en un tab de la página de Personal.
+model Incidencia {
+  id          Int            @id @default(autoincrement())
+  personalId  Int
+  tipo        TipoIncidencia
+  fecha       DateTime       @db.Date
+  descripcion String?
+  // Borrado lógico.
+  activo      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  personal Personal @relation(fields: [personalId], references: [id], onDelete: Restrict)
+
+  @@index([personalId])
+  @@index([fecha])
+  @@index([tipo])
+  @@index([activo])
+}
+
+// =================================================================
+// Vacaciones (solicitudes de vacaciones del personal)
+// =================================================================
+// Cada registro es una solicitud de vacaciones de un empleado
+// con un rango de fechas y la cantidad de días pedidos. Vive en
+// un tab de la página de Personal.
+model Vacacion {
+  id               Int      @id @default(autoincrement())
+  personalId       Int
+  fechaInicio      DateTime @db.Date
+  fechaFin         DateTime @db.Date
+  diasSolicitados  Int
+  observaciones    String?
+  // Borrado lógico.
+  activo           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  personal Personal @relation(fields: [personalId], references: [id], onDelete: Restrict)
+
+  @@index([personalId])
+  @@index([fechaInicio])
+  @@index([fechaFin])
+  @@index([activo])
+}
+
+// =================================================================
+// Días Económicos (solicitudes de días con goce de sueldo)
+// =================================================================
+// Cada registro es una solicitud de días económicos de un empleado
+// SINDICALIZADO. Se otorgan por año calendario. Vive en un tab de la
+// página de Personal. El backend rechaza cualquier intento de crear
+// un registro para un empleado de tipo CONFIANZA.
+model DiaEconomico {
+  id              Int        @id @default(autoincrement())
+  personalId      Int
+  anio            Int        // 4 dígitos, ej. 2026
+  diasSolicitados Int
+  // Fechas específicas en que se tomaron los días económicos (varios días
+  // no consecutivos). Opcional — los registros viejos quedan con [].
+  fechas          DateTime[] @default([]) @db.Date
+  observaciones   String?
+  // Borrado lógico.
+  activo          Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  personal Personal @relation(fields: [personalId], references: [id], onDelete: Restrict)
+
+  @@index([personalId])
+  @@index([anio])
+  @@index([activo])
+}
+
+// =================================================================
+// Injustificantes (ausencias no justificadas)
+// =================================================================
+// Registro de días en los que un empleado no se presentó sin
+// justificación. Vive en un tab de la página de Personal.
+model Injustificante {
+  id         Int      @id @default(autoincrement())
+  personalId Int
+  fecha      DateTime @db.Date
+  razon      String
+  // Borrado lógico.
+  activo     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  personal Personal @relation(fields: [personalId], references: [id], onDelete: Restrict)
+
+  @@index([personalId])
+  @@index([fecha])
+  @@index([activo])
+}
+
+// =================================================================
+// Requisiciones (pedidos a compras)
+// =================================================================
+// Cada requisición es un pedido que se hace al área de compras.
+// Si se marca como "Surtido" y a la vez "Es Consumible", al
+// surtirla se crea automáticamente un movimiento de ENTRADA en
+// el catálogo de Consumibles (creando el consumible si no existe).
+model Requisicion {
+  id              Int       @id @default(autoincrement())
+  numero          String    @unique @db.VarChar(40)
+  concepto        String    @db.VarChar(200)
+  cantidad        Decimal   @db.Decimal(10, 2)
+  unidad          Unidad
+  partida         String    @db.VarChar(100)
+  fechaSolicitud  DateTime  @db.Date
+  observaciones   String?
+  // Surtido: si true, fechaEntrega es obligatoria.
+  surtido         Boolean   @default(false)
+  fechaEntrega    DateTime? @db.Date
+  // Es consumible: si true y se marca como surtido, se crea el
+  // movimiento de entrada en el catálogo de Consumibles.
+  esConsumible    Boolean   @default(false)
+  // Idempotencia: referencia al movimiento creado (si aplica).
+  // Evita duplicar el movimiento si el usuario edita varias veces.
+  consumibleMovimientoId Int? @unique
+  activo          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relación 1:N reversa con ConsumibleMovimiento (cuando una entrada
+  // apunta a esta requisición). Necesita nombre porque ya hay una 1:1
+  // entre Requisicion.consumibleMovimientoId y ConsumibleMovimiento.
+  movimientos     ConsumibleMovimiento[] @relation("MovimientoRequisicion")
+
+  // Relación con el movimiento creado (si lo hubo)
+  // (1:1 — solo este lado lleva fields+references; el otro solo declara el nombre)
+  consumibleMovimiento ConsumibleMovimiento? @relation("RequisicionConsumibleMovimiento", fields: [consumibleMovimientoId], references: [id], onDelete: SetNull)
+
+  @@index([fechaSolicitud])
+  @@index([surtido])
+  @@index([esConsumible])
+  @@index([activo])
+}
+
+// =================================================================
+// Consumibles (catálogo de productos con stock)
+// =================================================================
+// El catálogo de consumibles. Cada producto (concepto+unidad) tiene
+// un stock actual que se modifica con movimientos de ENTRADA (cuando
+// se surte una requisición) o SALIDA (cuando se entrega a personal).
+model Consumible {
+  id              Int       @id @default(autoincrement())
+  concepto        String    @db.VarChar(200)
+  unidad          Unidad
+  // Stock disponible. Se calcula pero se persiste por simplicidad.
+  cantidadActual  Decimal   @default(0) @db.Decimal(10, 2)
+  // Imagen opcional (ruta local o base64). Por ahora texto libre.
+  imagen          String?
+  observaciones   String?
+  activo          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  movimientos     ConsumibleMovimiento[]
+
+  // Un producto por (concepto, unidad) en el catálogo
+  @@unique([concepto, unidad])
+  @@index([concepto])
+  @@index([activo])
+}
+
+// =================================================================
+// Movimientos de Consumibles (historial)
+// =================================================================
+// Cada movimiento es un cambio al stock: ENTRADA (suma) o SALIDA
+// (resta). Las ENTRADAS provienen de requisiciones surtidas; las
+// SALIDAS son entregas a personal del IMBIO.
+model ConsumibleMovimiento {
+  id              Int       @id @default(autoincrement())
+  consumibleId    Int
+  tipo            TipoMovimientoConsumible
+  cantidad        Decimal   @db.Decimal(10, 2)
+  fecha           DateTime  @default(now()) @db.Date
+  // Para ENTRADA: apunta a la requisición que originó el movimiento.
+  // Para SALIDA: null.
+  requisicionId   Int?
+  // Para SALIDA: el empleado que recibió el consumible.
+  // Para ENTRADA: null.
+  personalId      Int?
+  observaciones   String?
+  activo          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  consumible   Consumible   @relation(fields: [consumibleId], references: [id], onDelete: Restrict)
+  // 1:N: un movimiento puede tener 0 o 1 requisición origen
+  requisicion  Requisicion? @relation("MovimientoRequisicion", fields: [requisicionId], references: [id], onDelete: SetNull)
+  // 1:1: la requisición "dueña" del movimiento (idempotencia)
+  requisicionOrigen Requisicion? @relation("RequisicionConsumibleMovimiento")
+  personal     Personal?    @relation(fields: [personalId], references: [id], onDelete: SetNull)
+
+  @@index([consumibleId])
+  @@index([fecha])
+  @@index([tipo])
+  @@index([personalId])
+  @@index([activo])
+}
+
+// =================================================================
+// Resguardos (inventario de equipo asignado al personal)
+// =================================================================
+// Cada Resguardo es la "tarjeta de inventario" de un equipo
+// (laptop, mouse, monitor, etc.) con su imagen, marca, modelo y
+// número de serie. El historial de quién lo tuvo se lleva en
+// ResguardoHistorial, que registra cada asignación/devolución.
+model Resguardo {
+  id                   Int              @id @default(autoincrement())
+  // Tipo de equipo (texto libre, ej. "LAPTOP", "MOUSE", "MONITOR")
+  tipo                 String           @db.VarChar(80)
+  marca                String           @db.VarChar(80)
+  modelo               String?          @db.VarChar(120)
+  // Número de serie único (clave natural del equipo)
+  numeroSerie          String           @unique @db.VarChar(120)
+  // Imagen del equipo (subida local en /uploads/resguardos/)
+  imagen               String?
+  descripcion          String?
+  estado               EstadoResguardo  @default(EN_BODEGA)
+  // Quién lo tiene AHORA (null si está en bodega, baja o reparación)
+  personalActualId     Int?
+  fechaAsignacionActual DateTime?        @db.Date
+  observaciones        String?
+  // Borrado lógico
+  activo               Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  // Relaciones
+  personalActual Personal?              @relation("ResguardoPersonalActual", fields: [personalActualId], references: [id], onDelete: SetNull)
+  historial      ResguardoHistorial[]
+
+  @@index([estado])
+  @@index([tipo])
+  @@index([personalActualId])
+  @@index([activo])
+}
+
+// =================================================================
+// Resguardos — Historial de asignaciones/devoluciones
+// =================================================================
+// Cada vez que un equipo se asigna a un empleado se crea un registro
+// aquí. Cuando se devuelve, se marca fechaDevolucion. Permite ver
+// quién ha tenido cada equipo a lo largo del tiempo.
+model ResguardoHistorial {
+  id              Int       @id @default(autoincrement())
+  resguardoId     Int
+  personalId      Int
+  fechaAsignacion DateTime  @db.Date
+  // null = el empleado todavía tiene el equipo
+  fechaDevolucion DateTime? @db.Date
+  // Motivo de la asignación o devolución (opcional)
+  motivo          String?   @db.VarChar(200)
+  observaciones   String?
+  // Borrado lógico
+  activo          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  resguardo Resguardo @relation(fields: [resguardoId], references: [id], onDelete: Cascade)
+  personal  Personal  @relation(fields: [personalId], references: [id], onDelete: Restrict)
+
+  @@index([resguardoId])
+  @@index([personalId])
+  @@index([fechaAsignacion])
+  @@index([activo])
+}
+
+model Configuracion {
+  id                       Int      @id @default(1)
+  nombreInstitucion        String   @default("IMBIO")
+  direccion                String?
+  telefono                 String?
+  email                    String?
+  sitioWeb                 String?
+  piePaginaAutorizacion    String?
+  // Series de folios
+  serieFolioSolicitud      String   @default("SOL")
+  serieFolioAutorizacion   String   @default("AUT")
+  // Siguiente número a usar (se incrementa en cada generación).
+  siguienteFolioSolicitud  Int      @default(1)
+  siguienteFolioAutorizacion Int    @default(1)
+  // Folio del permiso de área verde (formato "CC-AV-####", 4 dígitos).
+  serieFolioAreaVerde      String   @default("CC-AV")
+  siguienteFolioAreaVerde  Int      @default(1)
+  // Si el sistema es el "servidor principal" o un cliente.
+  esServidor               Boolean  @default(true)
+  // Valor de la UMA (Unidad de Medida y Actualización) usado para
+  // el cálculo de precios variables. Se actualiza manualmente cada
+  // año. Ejemplo: vvuma = 117.31
+  // Se guarda con 4 decimales para soportar valores como 117.3145
+  vvuma                    Decimal? @db.Decimal(10, 4) @default(117.31)
+  updatedAt                DateTime @updatedAt
+}

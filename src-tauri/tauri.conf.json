@@ -32,6 +32,22 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../installer/scripts/install.ps1": "resources/install.ps1",
+      "../installer/scripts/install-server.ps1": "resources/install-server.ps1",
+      "../installer/scripts/install-client.ps1": "resources/install-client.ps1",
+      "../installer/scripts/uninstall.ps1": "resources/uninstall.ps1",
+      "../installer/scripts/common.ps1": "resources/common.ps1",
+      "../installer/scripts/download-binaries.ps1": "resources/download-binaries.ps1"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer/installer-hooks.nsh",
+        "installMode": "perMachine",
+        "displayLanguageSelector": false,
+        "languages": ["Spanish"]
+      }
+    }
   }
 }

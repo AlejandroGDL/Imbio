@@ -1,4 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { initConfig } from "@/lib/config";
 
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -17,6 +19,13 @@ import { ResguardosPage } from "@/pages/Resguardos";
 import { DashboardPage } from "@/pages/Dashboard";
 
 function App() {
+  // Pre-cargar la configuración del instalador (si existe en disco)
+  // antes de renderizar. Es async pero los componentes usan la
+  // versión síncrona que devuelve el cache, y luego se actualiza.
+  useEffect(() => {
+    void initConfig();
+  }, []);
+
   return (
     <AuthProvider>
       <Routes>

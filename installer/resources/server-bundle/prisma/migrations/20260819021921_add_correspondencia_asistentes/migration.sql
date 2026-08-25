@@ -1,0 +1,1 @@
+ALTER TABLE "Correspondencia" ADD COLUMN "asistentesIds" INTEGER[] NOT NULL DEFAULT ARRAY[]::INTEGER[];
