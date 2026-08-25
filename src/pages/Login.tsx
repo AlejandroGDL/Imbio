@@ -49,7 +49,6 @@ import {
   candidateSubnetsFromClient,
   ipsFromSubnets,
   parseSubnet,
-  probeHealth,
   scanSubnetForServer,
   type DetectedIp,
 } from "@/lib/lan-detect";
@@ -94,8 +93,6 @@ function ServerSelector({ initialUrl, onConnected }: ServerSelectorProps) {
     total: number;
   } | null>(null);
   const [foundServers, setFoundServers] = useState<string[]>([]);
-  const [manualIp, setManualIp] = useState("");
-  const [probingManual, setProbingManual] = useState(false);
   // Subredes adicionales que el usuario quiere escanear
   const [customSubnets, setCustomSubnets] = useState<string[]>([]);
   const [newSubnet, setNewSubnet] = useState("");
@@ -254,39 +251,6 @@ function ServerSelector({ initialUrl, onConnected }: ServerSelectorProps) {
     setCustomSubnets((subs) => [...subs, parsed]);
     setNewSubnet("");
     toast.success(`Subred ${parsed}.x agregada al escaneo`);
-  };
-
-  // Probar una IP específica (manual, cuando WebRTC no detecta)
-  const probeManualIp = async () => {
-    const trimmed = manualIp.trim();
-    if (!trimmed) {
-      toast.error("Escribe una IP o hostname");
-      return;
-    }
-    const port = getPortFromUrl(url) || 3000;
-    // Si parece un hostname (contiene letras), no le agregamos :port
-    const hasLetters = /[a-zA-Z]/.test(trimmed);
-    const urlToTest = hasLetters
-      ? (trimmed.startsWith("http") ? trimmed : `http://${trimmed}`)
-      : (trimmed.startsWith("http") ? trimmed : `http://${trimmed}:${port}`);
-    setProbingManual(true);
-    try {
-      const ok = await probeHealth(urlToTest);
-      if (ok) {
-        toast.success("¡Servidor encontrado!", { description: urlToTest });
-        await useServer(urlToTest);
-      } else {
-        toast.error("No responde", {
-          description: `${urlToTest} no devolvió un servidor IMBIO válido.`,
-        });
-      }
-    } catch (err) {
-      toast.error("Error al probar", {
-        description: err instanceof Error ? err.message : "Error desconocido",
-      });
-    } finally {
-      setProbingManual(false);
-    }
   };
 
   return (
