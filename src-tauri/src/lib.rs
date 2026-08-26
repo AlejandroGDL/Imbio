@@ -1,5 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
@@ -36,9 +36,10 @@ fn get_install_config() -> Option<InstallConfig> {
     None
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct InstallConfig {
-    serverUrl: String,
+    server_url: String,
     mode: String,
 }
 
