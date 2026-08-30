@@ -28,16 +28,18 @@ Var IMBIO_INSTALL_MODE
 
 ; -----------------------------------------------------------------
 ; Helper: log SIEMPRE (incluso si el usuario aborta)
+; Usa Push/Pop para preservar $0 y no contaminar el scope del caller
 ; -----------------------------------------------------------------
 !macro IMBIO_LOG TEXT
-    ; Crear carpeta si no existe
+    Push $0
+    Push $1
     CreateDirectory "$PROGRAMFILES\IMBIO\logs"
-    ; (en PREINSTALL todavía no existe $INSTDIR, por eso usamos
-    ; una ruta absoluta)
     FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
     FileSeek $0 0 END
     FileWrite $0 "[NSIS] $TEXT$\r$\n"
     FileClose $0
+    Pop $1
+    Pop $0
 !macroend
 
 ; -----------------------------------------------------------------
@@ -46,7 +48,7 @@ Var IMBIO_INSTALL_MODE
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_PREINSTALL
     StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}"
-    ${IMBIO_LOG} "PREINSTALL: mostrando MessageBox de selección de modo"
+    !insertmacro IMBIO_LOG "PREINSTALL: mostrando MessageBox de selección de modo"
 
     ; UN SOLO MessageBox con 3 botones (SÍ / NO / Cancelar)
     ; - SÍ      = Servidor
@@ -62,17 +64,17 @@ Var IMBIO_INSTALL_MODE
 
     imbio_mode_server:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SERVER}"
-        ${IMBIO_LOG} "Modo seleccionado: SERVIDOR"
+        !insertmacro IMBIO_LOG "Modo seleccionado: SERVIDOR"
         Goto imbio_mode_done
 
     imbio_mode_client:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_CLIENT}"
-        ${IMBIO_LOG} "Modo seleccionado: CLIENTE"
+        !insertmacro IMBIO_LOG "Modo seleccionado: CLIENTE"
         Goto imbio_mode_done
 
     imbio_mode_cancel:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}"
-        ${IMBIO_LOG} "Usuario canceló la instalación (IDCANCEL)"
+        !insertmacro IMBIO_LOG "Usuario canceló la instalación (IDCANCEL)"
         MessageBox MB_OK|MB_ICONINFORMATION "Instalación cancelada."
         Abort
 
@@ -90,7 +92,7 @@ Var IMBIO_INSTALL_MODE
 ; Ejecuta el script PowerShell de configuración.
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_POSTINSTALL
-    ${IMBIO_LOG} "POSTINSTALL: modo=$IMBIO_INSTALL_MODE, INSTDIR=$INSTDIR"
+    !insertmacro IMBIO_LOG "POSTINSTALL: modo=$IMBIO_INSTALL_MODE, INSTDIR=$INSTDIR"
 
     ; Si el usuario canceló, salir (no hacer nada)
     StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}" imbio_post_done
