@@ -2,16 +2,8 @@
 ; installer-hooks.nsh
 ; =================================================================
 ; Hooks de NSIS para el instalador de IMBIO.
-;
 ; Configurado en tauri.conf.json:
-;   "bundle": { "windows": { "nsis": { "installerHooks":
-;     "src-tauri/installer/installer-hooks.nsh" } } }
-;
-; Flujo del usuario:
-;   1. Wizard estándar de Tauri (bienvenida, licencia, ruta)
-;   2. PREINSTALL: 1 MessageBox con 3 botones (Servidor/Cliente/Cancelar)
-;   3. Tauri copia los archivos
-;   4. POSTINSTALL: ejecuta PowerShell según el modo elegido
+;   bundle.windows.nsis.installerHooks = "installer/installer-hooks.nsh"
 ; =================================================================
 
 ; -----------------------------------------------------------------
@@ -28,10 +20,7 @@ Var IMBIO_INSTALL_MODE
 
 ; -----------------------------------------------------------------
 ; Helper: log SIEMPRE (incluso si el usuario aborta)
-; Usa Push/Pop para preservar $0 y no contaminar el scope del caller
-; IMPORTANTE: usar ${LOGMSG} con delimitadores {}, NO $LOGMSG$.
-; En NSIS, $LOGMSG$ sería una variable llamada "LOGMSG$" (el $
-; final no es delimitador), lo que causa warning 6000.
+; IMPORTANTE: usar ${LOGMSG} con delimitadores {}, NO $LOGMSG.
 ; -----------------------------------------------------------------
 !macro IMBIO_LOG LOGMSG
     Push $0
@@ -48,59 +37,56 @@ Var IMBIO_INSTALL_MODE
 ; -----------------------------------------------------------------
 ; NSIS_HOOK_PREINSTALL
 ; Pregunta al usuario con UN SOLO MessageBox de 3 botones.
+;
+; Importante: todo en una sola linea fisica (sin \ al final) y
+; sin caracteres especiales (em dash, arrows) que pueden romper
+; el parser de NSIS en algunos charsets.
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_PREINSTALL
     StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}"
-    !insertmacro IMBIO_LOG "PREINSTALL: mostrando MessageBox de selección de modo"
+    !insertmacro IMBIO_LOG "PREINSTALL"
 
-    ; UN SOLO MessageBox con 3 botones (SÍ / NO / Cancelar)
-    ; - SÍ      = Servidor
-    ; - NO      = Cliente
-    ; - Cancelar = Abortar instalación
-    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "IMBIO — Selecciona cómo se usará esta PC$\r$\n$\r$\nSÍ (Servidor) → Instala Node.js, PostgreSQL y el backend. Esta PC será la que tenga la base de datos.$\r$\n$\r$\nNO (Cliente) → Solo instala la app. Te pedirá la URL de la PC servidor.$\r$\n$\r$\nCancelar → No instala nada." \
-        IDYES imbio_mode_server \
-        IDNO imbio_mode_client \
-        IDCANCEL imbio_mode_cancel
+    ; Texto del MessageBox (sin acentos, sin caracteres especiales)
+    ; Los saltos de linea en NSIS MessageBox se indican con $\r$\n
+    StrCpy $0 "IMBIO - Como se usara esta PC?$\r$\n$\r$\nSI (Servidor) = Instala Node.js, PostgreSQL y el backend. Esta PC tendra la base de datos.$\r$\n$\r$\nNO (Cliente) = Solo instala la app. Te pedira la URL del servidor.$\r$\n$\r$\nCancelar = No instala nada."
 
-    ; Si llega aquí sin saltar a una etiqueta, también cancelar
+    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "$0" IDYES imbio_mode_server IDNO imbio_mode_client IDCANCEL imbio_mode_cancel
     Goto imbio_mode_cancel
 
     imbio_mode_server:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SERVER}"
-        !insertmacro IMBIO_LOG "Modo seleccionado: SERVIDOR"
+        !insertmacro IMBIO_LOG "Modo: SERVIDOR"
         Goto imbio_mode_done
 
     imbio_mode_client:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_CLIENT}"
-        !insertmacro IMBIO_LOG "Modo seleccionado: CLIENTE"
+        !insertmacro IMBIO_LOG "Modo: CLIENTE"
         Goto imbio_mode_done
 
     imbio_mode_cancel:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}"
-        !insertmacro IMBIO_LOG "Usuario canceló la instalación (IDCANCEL)"
-        MessageBox MB_OK|MB_ICONINFORMATION "Instalación cancelada."
+        !insertmacro IMBIO_LOG "Usuario cancelo"
+        MessageBox MB_OK|MB_ICONINFORMATION "Instalacion cancelada."
         Abort
 
     imbio_mode_done:
-        ; Mensaje de confirmación
         ${If} $IMBIO_INSTALL_MODE == "${IMBIO_MODE_SERVER}"
-            MessageBox MB_OK|MB_ICONINFORMATION "Modo SERVIDOR.$\r$\n$\r$\nAl finalizar la instalación se descargarán Node.js, PostgreSQL y se configurará todo como servicios de Windows.$\r$\n$\r$\n(Requiere internet y permisos de administrador)"
+            MessageBox MB_OK|MB_ICONINFORMATION "Modo SERVIDOR.$\r$\n$\r$\nAl finalizar la instalacion se descargaran Node.js y PostgreSQL, y se configuraran como servicios de Windows con auto-arranque.$\r$\n$\r$\n(Requiere internet y permisos de administrador)"
         ${Else}
-            MessageBox MB_OK|MB_ICONINFORMATION "Modo CLIENTE.$\r$\n$\r$\nAl finalizar la instalación se te pedirá la URL del servidor IMBIO.$\r$\n$\r$\n(Por ejemplo: http://192.168.0.10:3000)"
+            MessageBox MB_OK|MB_ICONINFORMATION "Modo CLIENTE.$\r$\n$\r$\nAl finalizar la instalacion se te pedira la URL del servidor IMBIO.$\r$\n$\r$\n(Por ejemplo: http://192.168.0.10:3000)"
         ${EndIf}
 !macroend
 
 ; -----------------------------------------------------------------
 ; NSIS_HOOK_POSTINSTALL
-; Ejecuta el script PowerShell de configuración.
+; Ejecuta el script PowerShell de configuracion.
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_POSTINSTALL
-    !insertmacro IMBIO_LOG "POSTINSTALL: modo=$IMBIO_INSTALL_MODE, INSTDIR=$INSTDIR"
+    !insertmacro IMBIO_LOG "POSTINSTALL"
 
-    ; Si el usuario canceló, salir (no hacer nada)
     StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}" imbio_post_done
 
-    ; Buscar el script PowerShell (puede estar en resources/ o en raíz)
+    ; Buscar el script PowerShell
     StrCpy $0 "$INSTDIR\resources\install.ps1"
     IfFileExists "$0" +2
     StrCpy $0 "$INSTDIR\install.ps1"
@@ -108,32 +94,18 @@ Var IMBIO_INSTALL_MODE
     IfFileExists "$0" imbio_run_ps imbio_post_done
 
     imbio_run_ps:
-        ; Crear carpeta de logs y config
+        ; Crear carpetas
         CreateDirectory "$PROGRAMDATA\IMBIO\logs"
-
-        ; Log con timestamp
-        FileOpen $1 "$PROGRAMDATA\IMBIO\logs\imbio-install.log" a
-        FileSeek $1 0 END
-        FileWrite $1 "[POSTINSTALL] Ejecutando: powershell -File $\"$0$\" -Mode $IMBIO_INSTALL_MODE -InstallDir $\"$INSTDIR$\"$\r$\n"
-        FileClose $1
+        CreateDirectory "$PROGRAMDATA\IMBIO"
 
         DetailPrint "Configurando IMBIO (modo: $IMBIO_INSTALL_MODE)..."
 
-        ; Ejecutar PowerShell en una ventana VISIBLE para que el
-        ; usuario vea el progreso (descarga de binarios tarda).
-        ; -Wait: esperar a que termine
-        ; El usuario ve toda la salida del script
+        ; Ejecutar PowerShell en ventana VISIBLE para que el usuario
+        ; vea el progreso (descarga de binarios tarda).
         ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$0" -Mode $IMBIO_INSTALL_MODE -InstallDir "$INSTDIR"'
 
-        ; Log del resultado
-        FileOpen $1 "$PROGRAMDATA\IMBIO\logs\imbio-install.log" a
-        FileSeek $1 0 END
-        FileWrite $1 "[POSTINSTALL] PowerShell terminó con código: $0$\r$\n"
-        FileClose $1
-
-        ; Mensaje final
         ${If} $IMBIO_INSTALL_MODE == "${IMBIO_MODE_SERVER}"
-            MessageBox MB_OK|MB_ICONINFORMATION "IMBIO Server instalado.$\r$\n$\r$\nEl servidor y PostgreSQL están corriendo como servicios de Windows con auto-arranque.$\r$\n$\r$\n• Para ver el estado: busca 'IMBIO Server Manager' en el escritorio$\r$\n• Para ver logs: C:\ProgramData\IMBIO\logs\"
+            MessageBox MB_OK|MB_ICONINFORMATION "IMBIO Server instalado.$\r$\n$\r$\nEl servidor y PostgreSQL estan corriendo como servicios de Windows con auto-arranque.$\r$\n$\r$\n- Para ver el estado: busca 'IMBIO Server Manager' en el escritorio$\r$\n- Para ver logs: C:\ProgramData\IMBIO\logs\"
         ${Else}
             MessageBox MB_OK|MB_ICONINFORMATION "IMBIO Cliente instalado.$\r$\n$\r$\nAbre la app desde el acceso directo del escritorio."
         ${EndIf}
@@ -143,7 +115,6 @@ Var IMBIO_INSTALL_MODE
 
 ; -----------------------------------------------------------------
 ; NSIS_HOOK_PREUNINSTALL
-; Detiene los servicios antes de borrar archivos.
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_PREUNINSTALL
     StrCpy $0 "$INSTDIR\resources\uninstall.ps1"
@@ -158,7 +129,6 @@ Var IMBIO_INSTALL_MODE
 
 ; -----------------------------------------------------------------
 ; NSIS_HOOK_POSTUNINSTALL
-; No hace nada extra.
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_POSTUNINSTALL
 !macroend
