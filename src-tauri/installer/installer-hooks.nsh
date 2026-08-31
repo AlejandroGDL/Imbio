@@ -29,14 +29,16 @@ Var IMBIO_INSTALL_MODE
 ; -----------------------------------------------------------------
 ; Helper: log SIEMPRE (incluso si el usuario aborta)
 ; Usa Push/Pop para preservar $0 y no contaminar el scope del caller
+; NOTA: el parametro NO se puede llamar "TEXT" porque es una constante
+; predefinida de NSIS.
 ; -----------------------------------------------------------------
-!macro IMBIO_LOG TEXT
+!macro IMBIO_LOG LOGMSG
     Push $0
     Push $1
     CreateDirectory "$PROGRAMFILES\IMBIO\logs"
     FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
     FileSeek $0 0 END
-    FileWrite $0 "[NSIS] $TEXT$\r$\n"
+    FileWrite $0 "[NSIS] $LOGMSG$\r$\n"
     FileClose $0
     Pop $1
     Pop $0
