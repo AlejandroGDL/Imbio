@@ -29,8 +29,9 @@ Var IMBIO_INSTALL_MODE
 ; -----------------------------------------------------------------
 ; Helper: log SIEMPRE (incluso si el usuario aborta)
 ; Usa Push/Pop para preservar $0 y no contaminar el scope del caller
-; NOTA: el parametro NO se puede llamar "TEXT" porque es una constante
-; predefinida de NSIS.
+; IMPORTANTE: usar ${LOGMSG} con delimitadores {}, NO $LOGMSG$.
+; En NSIS, $LOGMSG$ sería una variable llamada "LOGMSG$" (el $
+; final no es delimitador), lo que causa warning 6000.
 ; -----------------------------------------------------------------
 !macro IMBIO_LOG LOGMSG
     Push $0
@@ -38,7 +39,7 @@ Var IMBIO_INSTALL_MODE
     CreateDirectory "$PROGRAMFILES\IMBIO\logs"
     FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
     FileSeek $0 0 END
-    FileWrite $0 "[NSIS] $LOGMSG$\r$\n"
+    FileWrite $0 "[NSIS] ${LOGMSG}$\r$\n"
     FileClose $0
     Pop $1
     Pop $0
