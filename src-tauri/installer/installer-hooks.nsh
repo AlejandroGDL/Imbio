@@ -1,8 +1,9 @@
 ; =================================================================
-; installer-hooks.nsh - Hooks NSIS para IMBIO (sin macros)
+; installer-hooks.nsh - Hooks NSIS para IMBIO
 ; =================================================================
-; Esta version NO usa macros personalizadas NI LogicLib.
-; Todo el codigo es NSIS puro para maxima compatibilidad.
+; Approach: 2 MessageBox simples (YESNO) secuenciales en vez de
+; uno solo con 3 botones. Esto evita el bug de NSIS con
+; MB_YESNOCANCEL dentro de installerHooks.
 ; =================================================================
 
 !define IMBIO_MODE_SERVER "server"
@@ -17,18 +18,29 @@ Var IMBIO_INSTALL_MODE
 !macro NSIS_HOOK_PREINSTALL
     StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}"
 
-    ; UN MessageBox con 3 botones: SI=Servidor, NO=Cliente, Cancelar
-    StrCpy $1 "IMBIO - Como se usara esta PC?$\r$\n$\r$\nSI (Servidor) = Instala Node.js, PostgreSQL y el backend.$\r$\nNO (Cliente) = Solo la app.$\r$\nCancelar = No instala nada."
+    ; Mensaje 1: ¿Servidor?
+    StrCpy $1 "IMBIO - Esta PC sera el SERVIDOR central?$\r$\n$\r$\nSI = Instala Node.js, PostgreSQL y el backend.$\r$\nEsta PC tendra la base de datos.$\r$\n$\r$\nNO = Esta PC sera un cliente (te pedira la URL del servidor)."
 
-    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "$1" IDYES imbio_pre_server IDNO imbio_pre_client IDCANCEL imbio_pre_cancel
+    MessageBox MB_YESNO|MB_ICONQUESTION "$1" IDYES imbio_pre_server IDNO imbio_pre_check_client
     Goto imbio_pre_cancel
 
     imbio_pre_server:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SERVER}"
+        MessageBox MB_OK|MB_ICONINFORMATION "Modo SERVIDOR.$\r$\n$\r$\nAl finalizar la instalacion se descargaran Node.js y PostgreSQL, y se configuraran como servicios de Windows."
         Goto imbio_pre_done
+
+    imbio_pre_check_client:
+        ; Mensaje 2: ¿Cliente?
+        StrCpy $1 "IMBIO - Esta PC sera un CLIENTE (se conecta a otra PC que es el servidor)?$\r$\n$\r$\nSI = Solo instala la app. Te pedira la URL del servidor.$\r$\nNO = Cancela la instalacion."
+
+        MessageBox MB_YESNO|MB_ICONQUESTION "$1" IDYES imbio_pre_client IDNO imbio_pre_cancel
+
+        ; Si llega aqui, era cliente pero canceló
+        Goto imbio_pre_cancel
 
     imbio_pre_client:
         StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_CLIENT}"
+        MessageBox MB_OK|MB_ICONINFORMATION "Modo CLIENTE.$\r$\n$\r$\nAl finalizar la instalacion se te pedira la URL del servidor IMBIO.$\r$\n(Por ejemplo: http://192.168.0.10:3000)"
         Goto imbio_pre_done
 
     imbio_pre_cancel:
@@ -37,17 +49,6 @@ Var IMBIO_INSTALL_MODE
         Abort
 
     imbio_pre_done:
-        ; Mensaje de confirmacion (separado por modo)
-        StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SERVER}" 0 imbio_pre_client_msg
-        StrCpy $1 "Modo SERVIDOR.$\r$\n$\r$\nSe descargaran Node.js y PostgreSQL. Servicios con auto-arranque.$\r$\n$\r$\n(Requiere internet y permisos de administrador)"
-        MessageBox MB_OK|MB_ICONINFORMATION "$1"
-        Goto imbio_pre_done_end
-
-    imbio_pre_client_msg:
-        StrCpy $1 "Modo CLIENTE.$\r$\n$\r$\nAl finalizar la instalacion se te pedira la URL del servidor IMBIO.$\r$\n$\r$\n(Por ejemplo: http://192.168.0.10:3000)"
-        MessageBox MB_OK|MB_ICONINFORMATION "$1"
-
-    imbio_pre_done_end:
 !macroend
 
 ; -----------------------------------------------------------------
@@ -56,7 +57,6 @@ Var IMBIO_INSTALL_MODE
 !macro NSIS_HOOK_POSTINSTALL
     StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}" imbio_post_done
 
-    ; Buscar install.ps1
     StrCpy $0 "$INSTDIR\resources\install.ps1"
     IfFileExists "$0" +2
     StrCpy $0 "$INSTDIR\install.ps1"
@@ -67,14 +67,10 @@ Var IMBIO_INSTALL_MODE
         CreateDirectory "$PROGRAMDATA\IMBIO\logs"
         CreateDirectory "$PROGRAMDATA\IMBIO"
         DetailPrint "Configurando IMBIO (modo: $IMBIO_INSTALL_MODE)..."
-
-        ; Ejecutar PowerShell en ventana VISIBLE para que el usuario
-        ; vea el progreso (descarga de binarios tarda)
         ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$0" -Mode $IMBIO_INSTALL_MODE -InstallDir "$INSTDIR"'
 
-        ; Mensaje final
         StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SERVER}" 0 imbio_post_client_msg
-        StrCpy $1 "IMBIO Server instalado.$\r$\n$\r$\nServidor y PostgreSQL corriendo como servicios de Windows con auto-arranque.$\r$\n$\r$\n- Busca 'IMBIO Server Manager' en el escritorio$\r$\n- Logs en: C:\ProgramData\IMBIO\logs\"
+        StrCpy $1 "IMBIO Server instalado.$\r$\n$\r$\nServidor y PostgreSQL corriendo como servicios de Windows.$\r$\n$\r$\n- Busca 'IMBIO Server Manager' en el escritorio$\r$\n- Logs en: C:\ProgramData\IMBIO\logs\"
         MessageBox MB_OK|MB_ICONINFORMATION "$1"
         Goto imbio_post_done
 
