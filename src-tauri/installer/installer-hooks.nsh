@@ -1,8 +1,9 @@
 ; =================================================================
-; installer-hooks.nsh - Hooks NSIS para IMBIO (con debug inline)
+; installer-hooks.nsh - Hooks NSIS para IMBIO
 ; =================================================================
-; El POSTINSTALL tiene logs FileWrite en cada paso para saber
-; exactamente hasta donde llega cuando hay un problema.
+; POSTINSTALL: primer MessageBox es de DEBUG. Si lo ves, sabemos
+; que Tauri SI esta llamando al hook. Si no lo ves, Tauri no lo
+; llama (bug conocido en algunas versiones).
 ; =================================================================
 
 !define IMBIO_MODE_SERVER "server"
@@ -12,7 +13,7 @@
 Var IMBIO_INSTALL_MODE
 
 ; -----------------------------------------------------------------
-; PREINSTALL - Mensaje de seleccion
+; PREINSTALL
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_PREINSTALL
     StrCpy $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}"
@@ -47,64 +48,29 @@ Var IMBIO_INSTALL_MODE
 !macroend
 
 ; -----------------------------------------------------------------
-; POSTINSTALL - Con logs inline para debug
+; POSTINSTALL - Con MessageBox de debug
 ; -----------------------------------------------------------------
 !macro NSIS_HOOK_POSTINSTALL
-    ; === DEBUG: Log al inicio del POSTINSTALL (sin macros, inline) ===
-    CreateDirectory "$PROGRAMFILES\IMBIO\logs"
-    FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
-    FileSeek $0 0 END
-    FileWrite $0 "[POSTINSTALL] Hook iniciado. INSTDIR=$INSTDIR, mode=$IMBIO_INSTALL_MODE$\r$\n"
-    FileClose $0
+    ; === DEBUG: MessageBox visible para confirmar que se ejecuta ===
+    MessageBox MB_OK|MB_ICONINFORMATION "DEBUG: POSTINSTALL se esta ejecutando.$\r$\n$\r$\nINSTDIR = $INSTDIR$\r$\nModo = $IMBIO_INSTALL_MODE"
 
     ; Si cancelo, salir
     StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SKIP}" imbio_post_done
 
-    ; === DEBUG: Log despues del StrCmp ===
-    FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
-    FileSeek $0 0 END
-    FileWrite $0 "[POSTINSTALL] No es SKIP, continuando$\r$\n"
-    FileClose $0
-
     ; Buscar install.ps1
     StrCpy $0 "$INSTDIR\resources\install.ps1"
-    FileOpen $1 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
-    FileSeek $1 0 END
-    FileWrite $1 "[POSTINSTALL] Buscando: $0$\r$\n"
-    FileClose $1
-
     IfFileExists "$0" +2
     StrCpy $0 "$INSTDIR\install.ps1"
 
     IfFileExists "$0" imbio_post_run imbio_post_done
 
-    ; No se encontro install.ps1
-    FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
-    FileSeek $0 0 END
-    FileWrite $0 "[POSTINSTALL] ERROR: install.ps1 no encontrado en $INSTDIR\resources\install.ps1 ni en $INSTDIR\install.ps1$\r$\n"
-    FileClose $0
-    Goto imbio_post_done
-
     imbio_post_run:
-        ; === DEBUG: Log inicio del PowerShell ===
-        FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
-        FileSeek $0 0 END
-        FileWrite $0 "[POSTINSTALL] Ejecutando PowerShell: powershell.exe -File $0 -Mode $IMBIO_INSTALL_MODE -InstallDir $INSTDIR$\r$\n"
-        FileClose $0
-
         CreateDirectory "$PROGRAMDATA\IMBIO\logs"
         CreateDirectory "$PROGRAMDATA\IMBIO"
-
         DetailPrint "Configurando IMBIO (modo: $IMBIO_INSTALL_MODE)..."
 
         ; Ejecutar PowerShell en ventana VISIBLE
         ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$0" -Mode $IMBIO_INSTALL_MODE -InstallDir "$INSTDIR"'
-
-        ; === DEBUG: Log fin del PowerShell ===
-        FileOpen $0 "$PROGRAMFILES\IMBIO\logs\imbio-install.log" a
-        FileSeek $0 0 END
-        FileWrite $0 "[POSTINSTALL] PowerShell termino. Exit code: $0$\r$\n"
-        FileClose $0
 
         StrCmp $IMBIO_INSTALL_MODE "${IMBIO_MODE_SERVER}" 0 imbio_post_client_msg
         StrCpy $1 "IMBIO Server instalado.$\r$\n$\r$\nServidor y PostgreSQL corriendo como servicios de Windows.$\r$\n$\r$\n- Busca 'IMBIO Server Manager' en el escritorio$\r$\n- Logs en: C:\ProgramData\IMBIO\logs\"
@@ -124,7 +90,7 @@ Var IMBIO_INSTALL_MODE
 !macro NSIS_HOOK_PREUNINSTALL
     StrCpy $0 "$INSTDIR\resources\uninstall.ps1"
     IfFileExists "$0" +2
-    StrCpy $0 "$INSTDIR\uninstall.ps1"
+    StrCpy $0 "$INSTDIR\install.ps1"
     IfFileExists "$0" 0 imbio_uninst_done
     DetailPrint "Deteniendo servicios de IMBIO..."
     ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$0" -InstallDir "$INSTDIR" -KeepData'
