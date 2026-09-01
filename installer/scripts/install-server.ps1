@@ -253,9 +253,10 @@ try {
         Pause-And-Exit 1
     }
     Write-Ok "Migraciones aplicadas"
-} finally {
-    Pop-Location
 }
+    finally {
+        Pop-Location
+    }
 
 # --- 8. (Opcional) Correr seed inicial ---
 if ($RunSeed) {
@@ -268,9 +269,11 @@ if ($RunSeed) {
         } else {
             Write-Ok "Seed ejecutado"
         }
-    } catch {
+    }
+    catch {
         Write-Warn "No se pudo ejecutar el seed (puede que no haya archivo seed.ts)"
-    } finally {
+    }
+    finally {
         Pop-Location
     }
 }

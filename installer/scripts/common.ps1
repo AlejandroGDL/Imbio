@@ -103,7 +103,8 @@ function Wait-PortOpen {
                 return $true
             }
             $tcp.Close()
-        } catch {
+        }
+        catch {
             # seguir intentando
         }
         Start-Sleep -Milliseconds 500

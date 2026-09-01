@@ -61,7 +61,8 @@ function Download-File {
         Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -TimeoutSec 300
         $size = (Get-Item $Destination).Length
         Write-Host "    ✓ $([math]::Round($size / 1MB, 1)) MB" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Err "Falló la descarga de $Url"
         Write-Host "    $($_.Exception.Message)" -ForegroundColor Gray
         throw
@@ -81,7 +82,8 @@ function Expand-Zip {
         New-Item -Path $Destination -ItemType Directory -Force | Out-Null
         Expand-Archive -Path $ZipPath -DestinationPath $Destination -Force
         Write-Host "    ✓" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Err "Falló la descompresión de $ZipPath"
         throw
     }

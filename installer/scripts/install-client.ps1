@@ -66,11 +66,13 @@ try {
             if ($healthData.version) {
                 Write-Ok "  Versión: $($healthData.version)"
             }
-        } catch { }
+        }
+        catch { }
     } else {
         Write-Warn "El servidor respondió con código $($response.StatusCode)"
     }
-} catch {
+}
+catch {
     Write-Warn "No se pudo conectar a $healthUrl"
     Write-Host "    $($_.Exception.Message)" -ForegroundColor Gray
     Write-Host ""
