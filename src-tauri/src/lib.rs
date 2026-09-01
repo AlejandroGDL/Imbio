@@ -82,21 +82,26 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
 
     eprintln!("[IMBIO] Ejecutando: powershell.exe {}", args.join(" "));
 
-    // Ejecutar PowerShell SIN -Wait=false para que la ventana se muestre
-    // Usamos CREATE_NEW_CONSOLE para que sea una ventana separada
+    // Ejecutar PowerShell en una ventana VISIBLE
+    // Usamos cmd /c start para que abra una ventana separada y visible
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+        // cmd /c start "titulo" powershell.exe -NoProfile ...
+        // "start" abre una ventana nueva y devuelve el control inmediatamente
+        // La ventana queda abierta aunque el script termine
+        let mut start_args: Vec<String> = vec![
+            "/c".to_string(),
+            "start".to_string(),
+            "IMBIO Setup".to_string(), // título de la ventana
+            "/WAIT".to_string(),       // esperar a que termine
+            "powershell.exe".to_string(),
+        ];
+        start_args.extend(args);
 
-        let result = Command::new("powershell.exe")
-            .args(&args)
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn();
+        let result = Command::new("cmd.exe").args(&start_args).spawn();
 
         match result {
             Ok(mut child) => {
-                // Esperar a que termine
                 match child.wait() {
                     Ok(status) => {
                         let code = status.code().unwrap_or(-1);
@@ -104,14 +109,18 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
                             success: status.success(),
                             exit_code: code,
                             stdout: String::new(),
-                            stderr: String::new(),
+                            stderr: if !status.success() {
+                                format!("PowerShell termino con codigo {}", code)
+                            } else {
+                                String::new()
+                            },
                         }
                     }
                     Err(e) => SetupResult {
                         success: false,
                         exit_code: -1,
                         stdout: String::new(),
-                        stderr: format!("Error esperando PowerShell: {}", e),
+                        stderr: format!("Error esperando cmd: {}", e),
                     },
                 }
             }
@@ -119,7 +128,7 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
                 success: false,
                 exit_code: -1,
                 stdout: String::new(),
-                stderr: format!("Error ejecutando PowerShell: {}", e),
+                stderr: format!("Error ejecutando cmd: {}", e),
             },
         }
     }
@@ -144,6 +153,7 @@ struct InstallConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct SetupResult {
     success: bool,
     exit_code: i32,

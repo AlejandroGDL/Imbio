@@ -20,19 +20,20 @@ $Host.UI.RawUI.WindowTitle = "IMBIO Setup - Modo: $Mode"
 
 # Importar funciones comunes (con manejo de error)
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# === CREAR LOG Y CARPETA ANTES DE CUALQUIER COSA ===
+# Esto garantiza que siempre haya un log aunque algo falle temprano
+$progDataLog = Join-Path $env:ProgramData "IMBIO\logs"
+$logFile = Join-Path $progDataLog "install.log"
 try {
-    . (Join-Path $scriptPath "common.ps1")
+    if (-not (Test-Path $progDataLog)) {
+        New-Item -Path $progDataLog -ItemType Directory -Force | Out-Null
+    }
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "[$timestamp] [INFO] install.ps1 iniciado (modo=$Mode, installDir=$InstallDir, scriptPath=$scriptPath)" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
 } catch {
-    Write-Host ""
-    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
-    Write-Host "  ERROR: No se pudo cargar common.ps1" -ForegroundColor Red
-    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
-    Write-Host "  Ruta: $scriptPath" -ForegroundColor Red
-    Write-Host "  Detalle: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Yellow
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
+    # Si ni siquiera podemos crear el log, mostramos en consola
+    Write-Host "⚠ No se pudo crear log en $logFile" -ForegroundColor Yellow
 }
 
 Write-Host ""
@@ -40,10 +41,28 @@ Write-Host "══════════════════════�
 Write-Host "  IMBIO Setup - Modo: $Mode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "  InstallDir: $InstallDir" -ForegroundColor Gray
+Write-Host "  Log:        $logFile" -ForegroundColor Gray
 Write-Host ""
 
+# Ahora sí, importar common.ps1
+try {
+    . (Join-Path $scriptPath "common.ps1")
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [INFO] common.ps1 cargado" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
+} catch {
+    $errMsg = "ERROR: No se pudo cargar common.ps1 desde $scriptPath. Detalle: $($_.Exception.Message)"
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  ERROR" -ForegroundColor Red
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  $errMsg" -ForegroundColor Red
+    $errMsg | Add-Content -Path $logFile -ErrorAction SilentlyContinue
+    Write-Host ""
+    Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Yellow
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit 1
+}
+
 Initialize-IMBIODirectories
-Write-Log "Setup iniciado (modo=$Mode, installDir=$InstallDir)"
+"[$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))] [INFO] Setup iniciado" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
 
 # --- 0. Descomprimir el bundle del server ---
 $bundleZip = Join-Path $InstallDir "resources\server-bundle.zip"
