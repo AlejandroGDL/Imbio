@@ -82,6 +82,25 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
 
     eprintln!("[IMBIO] Ejecutando: powershell.exe {}", args.join(" "));
 
+    // Escribir log ANTES de invocar PowerShell. Si PS falla sin
+    // crear su propio log, al menos sabemos qué comando se intentó.
+    if let Some(log_dir) = std::env::var_os("ProgramData")
+        .map(|p| std::path::PathBuf::from(p).join("IMBIO").join("logs"))
+    {
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("install-rust.log");
+        let _ = std::fs::write(
+            &log_path,
+            format!(
+                "[ts={}] install.ps1 existe: {}\n[ts={}] Comando: powershell.exe {}\n",
+                chrono_like_now(),
+                script_path.exists(),
+                chrono_like_now(),
+                args.join(" ")
+            ),
+        );
+    }
+
     // Ejecutar PowerShell directamente con CREATE_NEW_CONSOLE para
     // que abra una ventana visible. Esperamos al proceso para obtener
     // el exit code real de PowerShell (no el de cmd.exe que siempre
@@ -167,6 +186,17 @@ fn program_data_path(app: &str, file: &str) -> Option<PathBuf> {
 
 fn app_data_path(app: &str, file: &str) -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join(app).join(file))
+}
+
+// Timestamp simple sin dependencias externas
+fn chrono_like_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Formato simple: segundos desde epoch (suficiente para debug)
+    format!("ts={}", secs)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

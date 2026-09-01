@@ -1,9 +1,8 @@
 # =================================================================
-# install.ps1 — Wrapper principal del instalador IMBIO
+# install.ps1 — Entry point de instalación IMBIO
 # =================================================================
-# Llama a install-server.ps1 o install-client.ps1 según el modo.
-# Tiene un wrapper try/catch que captura CUALQUIER error y muestra
-# el log antes de cerrar la ventana.
+# CREA EL LOG EN LA PRIMERA LÍNEA, antes de cualquier otra cosa.
+# Si el log no existe, hay un problema con permisos en ProgramData.
 # =================================================================
 
 [CmdletBinding()]
@@ -13,71 +12,99 @@ param(
     [string]$ServerUrl
 )
 
-# NO usar $ErrorActionPreference = "Stop" — queremos capturar
-# TODOS los errores, no abortar al primero.
-$ErrorActionPreference = "Continue"
-$Host.UI.RawUI.WindowTitle = "IMBIO Setup - Modo: $Mode"
-
-# Importar funciones comunes (con manejo de error)
-$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-# === CREAR LOG Y CARPETA ANTES DE CUALQUIER COSA ===
-# Esto garantiza que siempre haya un log aunque algo falle temprano
+# ==== PRIMERA LÍNEA EJECUTABLE: crear el log ====
 $progDataLog = Join-Path $env:ProgramData "IMBIO\logs"
 $logFile = Join-Path $progDataLog "install.log"
+
+# Si ProgramData no existe (raro), crearlo
+if (-not (Test-Path $env:ProgramData)) {
+    try {
+        New-Item -Path $env:ProgramData -ItemType Directory -Force | Out-Null
+    } catch {
+        $progDataLog = Join-Path $env:TEMP "imbio-install"
+        $logFile = Join-Path $progDataLog "install.log"
+    }
+}
+
+# Crear carpeta de logs (con fallback a TEMP)
 try {
     if (-not (Test-Path $progDataLog)) {
         New-Item -Path $progDataLog -ItemType Directory -Force | Out-Null
     }
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "[$timestamp] [INFO] install.ps1 iniciado (modo=$Mode, installDir=$InstallDir, scriptPath=$scriptPath)" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
 } catch {
-    Write-Host "⚠ No se pudo crear log en $logFile" -ForegroundColor Yellow
+    $progDataLog = Join-Path $env:TEMP "imbio-install"
+    $logFile = Join-Path $progDataLog "install.log"
+    if (-not (Test-Path $progDataLog)) {
+        New-Item -Path $progDataLog -ItemType Directory -Force | Out-Null
+    }
 }
 
-Write-Host ""
+# Escribir PRIMERA línea del log (esto SIEMPRE debe funcionar)
+$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$firstLine = "[$ts] [INIT] install.ps1 INICIADO. Mode=$Mode, InstallDir=$InstallDir"
+try {
+    Add-Content -Path $logFile -Value $firstLine -Encoding UTF8
+} catch {
+    # Si ni siquiera esto funciona, mostramos en consola
+    Write-Host "ERROR CRITICO: No se pudo escribir log en $logFile" -ForegroundColor Red
+}
+
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  IMBIO Setup - Modo: $Mode" -ForegroundColor Cyan
+Write-Host "  IMBIO Setup" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  InstallDir: $InstallDir" -ForegroundColor Gray
-Write-Host "  Log:        $logFile" -ForegroundColor Gray
+Write-Host "  Log: $logFile" -ForegroundColor Gray
 Write-Host ""
 
 # Función local de pause (por si common.ps1 no se carga)
 function Local-Pause-Exit {
     param([int]$ExitCode = 0)
     Write-Host ""
+    Write-Host "  Exit code: $ExitCode" -ForegroundColor Yellow
+    Write-Host "  Log: $logFile" -ForegroundColor Yellow
     Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Yellow
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     exit $ExitCode
 }
 
-# Ahora sí, importar common.ps1
-try {
-    . (Join-Path $scriptPath "common.ps1")
-    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [INFO] common.ps1 cargado OK" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
-} catch {
-    $errMsg = "ERROR: No se pudo cargar common.ps1 desde $scriptPath. Detalle: $($_.Exception.Message)"
+# ==== Cargar common.ps1 ====
+$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+$commonPath = Join-Path $scriptPath "common.ps1"
+Add-Content -Path $logFile -Value "[$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))] [INFO] scriptPath=$scriptPath" -Encoding UTF8
+
+if (-not (Test-Path $commonPath)) {
+    $err = "common.ps1 NO EXISTE en $commonPath"
+    Add-Content -Path $logFile -Value "[$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))] [FATAL] $err" -Encoding UTF8
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
     Write-Host "  ERROR FATAL" -ForegroundColor Red
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
-    Write-Host "  $errMsg" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "  Buscando en scriptPath: $scriptPath" -ForegroundColor Yellow
+    Write-Host "  $err" -ForegroundColor Red
     if (Test-Path $scriptPath) {
-        Write-Host "  Contenido de $scriptPath:" -ForegroundColor Yellow
+        Write-Host "  Archivos en $scriptPath:" -ForegroundColor Yellow
         Get-ChildItem $scriptPath | ForEach-Object { Write-Host "    - $($_.Name)" }
     } else {
         Write-Host "  La carpeta $scriptPath NO EXISTE" -ForegroundColor Red
     }
-    $errMsg | Add-Content -Path $logFile -ErrorAction SilentlyContinue
     Local-Pause-Exit 1
 }
 
-Initialize-IMBIODirectories
-"[$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))] [INFO] Setup iniciado" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
+try {
+    . $commonPath
+    Add-Content -Path $logFile -Value "[$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))] [INFO] common.ps1 cargado OK" -Encoding UTF8
+} catch {
+    $err = "Error cargando common.ps1: $($_.Exception.Message)"
+    Add-Content -Path $logFile -Value "[$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))] [FATAL] $err" -Encoding UTF8
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  ERROR FATAL" -ForegroundColor Red
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  $err" -ForegroundColor Red
+    Local-Pause-Exit 1
+}
 
-# --- 0. Descomprimir el bundle del server ---
+# Ahora sí, con common.ps1 cargado, podemos usar sus funciones
+Initialize-IMBIODirectories
+Write-Log "Setup iniciado (modo=$Mode, installDir=$InstallDir)"
+
+# ==== Descomprimir el bundle del server ====
 $bundleZip = Join-Path $InstallDir "resources\server-bundle.zip"
 $serverDir = Join-Path $InstallDir "server"
 if (Test-Path $bundleZip) {
@@ -98,8 +125,9 @@ if (Test-Path $bundleZip) {
             Write-Ok "Bundle descomprimido en $serverDir"
             Write-Log "Bundle descomprimido OK"
         } catch {
-            Write-Err "Error descomprimiendo el bundle: $($_.Exception.Message)"
-            Write-Log "ERROR descomprimiendo bundle: $($_.Exception.Message)"
+            $err = "Error descomprimiendo bundle: $($_.Exception.Message)"
+            Write-Err $err
+            Write-Log "ERROR: $err"
             Pause-And-Exit 1
         }
     } else {
@@ -110,7 +138,7 @@ if (Test-Path $bundleZip) {
     Write-Log "WARN: server-bundle.zip no encontrado"
 }
 
-# --- 1. Verificar / descargar binarios externos ---
+# ==== Verificar / descargar binarios externos ====
 $nodeExe = Join-Path $InstallDir "node\node.exe"
 $pgCtl   = Join-Path $InstallDir "pgsql\bin\pg_ctl.exe"
 $nssmExe = Join-Path $InstallDir "nssm.exe"
@@ -124,40 +152,40 @@ if ($Mode -eq "server") {
 
 if ($binariosFaltantes.Count -gt 0) {
     Write-Step "Descargando binarios externos: $($binariosFaltantes -join ', ')"
-    Write-Host "  (Esto puede tardar unos minutos dependiendo de tu conexion)" -ForegroundColor Gray
-    Write-Host ""
+    Write-Log "Descargando binarios: $($binariosFaltantes -join ', ')"
 
     $downloadScript = Join-Path $scriptPath "download-binaries.ps1"
     if (-not (Test-Path $downloadScript)) {
-        Write-Err "No se encontró download-binaries.ps1"
-        Write-Log "ERROR: download-binaries.ps1 no encontrado"
+        $err = "download-binaries.ps1 no encontrado"
+        Write-Err $err
+        Write-Log "ERROR: $err"
         Pause-And-Exit 1
     }
 
     try {
         & $downloadScript -InstallDir $InstallDir -Components $binariosFaltantes
         if ($LASTEXITCODE -ne 0) {
-            Write-Err "Falló la descarga de binarios (exit code $LASTEXITCODE)"
-            Write-Log "ERROR: descarga de binarios falló (exit $LASTEXITCODE)"
+            $err = "Descarga de binarios fallo (exit $LASTEXITCODE)"
+            Write-Err $err
+            Write-Log "ERROR: $err"
             Pause-And-Exit 1
         }
         Write-Log "Binarios descargados OK"
     } catch {
-        Write-Err "Error descargando binarios: $($_.Exception.Message)"
-        Write-Log "ERROR descargando binarios: $($_.Exception.Message)"
+        $err = "Error descargando binarios: $($_.Exception.Message)"
+        Write-Err $err
+        Write-Log "ERROR: $err"
         Pause-And-Exit 1
     }
-    Write-Host ""
 } else {
     Write-Ok "Todos los binarios externos ya están presentes"
 }
 
-# --- 2. Llamar al script específico del modo ---
+# ==== Llamar al script específico del modo ====
 try {
     switch ($Mode) {
         "server" {
             Write-Step "Iniciando instalación del servidor..."
-            Write-Host ""
             & (Join-Path $scriptPath "install-server.ps1") `
                 -InstallDir $InstallDir `
                 -ServerPort 3000 `
@@ -167,12 +195,9 @@ try {
         }
         "client" {
             Write-Step "Iniciando configuración del cliente..."
-            Write-Host ""
 
             if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
                 Write-Host "  Ingresa la URL del servidor IMBIO" -ForegroundColor White
-                Write-Host "  (por ejemplo: http://192.168.0.10:3000)" -ForegroundColor Gray
-                Write-Host ""
                 $inputUrl = Read-Host "  URL del servidor"
                 if ([string]::IsNullOrWhiteSpace($inputUrl)) {
                     Write-Err "No se proporcionó URL del servidor"
@@ -192,8 +217,8 @@ try {
     }
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Err "La instalación falló (exit code $LASTEXITCODE)"
-        Write-Log "ERROR: instalación falló (exit $LASTEXITCODE)"
+        Write-Err "La instalación falló (exit $LASTEXITCODE)"
+        Write-Log "ERROR: instalación falló"
         Pause-And-Exit $LASTEXITCODE
     }
 
@@ -203,21 +228,17 @@ try {
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
     Write-Log "Setup completado exitosamente"
 } catch {
+    $err = "ERROR FATAL: $($_.Exception.Message)"
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
     Write-Host "  ❌ ERROR DURANTE LA INSTALACIÓN" -ForegroundColor Red
     Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
     Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "  En: $($_.ScriptStackTrace)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "  Log completo en:" -ForegroundColor Yellow
-    Write-Host "  C:\ProgramData\IMBIO\logs\install.log" -ForegroundColor White
-    Write-Host ""
-    Write-Log "ERROR FATAL: $($_.Exception.Message)"
+    Write-Log "FATAL: $($_.Exception.Message)"
     Pause-And-Exit 1
 }
 
-# Pausa al final para que el usuario vea el resultado
+# Pausa al final
 Write-Host ""
-Write-Host "  Presiona cualquier tecla para cerrar esta ventana..." -ForegroundColor Cyan
+Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Cyan
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
