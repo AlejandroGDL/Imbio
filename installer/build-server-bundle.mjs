@@ -203,12 +203,29 @@ try {
 
 // ---------- 7. Generar el cliente de Prisma ----------
 // (usa el schema del server original, no el del bundle)
+//
+// Usamos la ruta directa al binario de prisma en tmpDevInstallDir
+// porque `npx prisma` falla si server/node_modules está vacío
+// (lo cual pasa en CI como Render donde solo se clona el repo).
 log("Generando cliente de Prisma...");
 try {
-  execSync("npx prisma generate --schema=prisma/schema.prisma", {
-    cwd: serverDir,
-    stdio: "inherit",
-  });
+  const prismaBin = join(tmpDevInstallDir, "node_modules", ".bin", "prisma");
+  if (!existsSync(prismaBin)) {
+    // Fallback: intentar con npx (funciona en dev local)
+    execSync("npx prisma generate --schema=prisma/schema.prisma", {
+      cwd: serverDir,
+      stdio: "inherit",
+    });
+  } else {
+    execSync(`"${prismaBin}" generate --schema=prisma/schema.prisma`, {
+      cwd: serverDir,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        NODE_PATH: join(tmpDevInstallDir, "node_modules"),
+      },
+    });
+  }
 } catch (e) {
   die("Falló prisma generate. Revisa el schema.prisma.");
 }
