@@ -1,0 +1,57 @@
+# =================================================================
+# render.yaml — Configuración de IMBIO en Render.com
+# =================================================================
+# Este archivo define la infraestructura del backend en Render.
+# Render lo lee automáticamente al hacer "Apply" desde el dashboard
+# o al conectar el repo.
+#
+# Stack:
+#   - Runtime: Node.js 22
+#   - DB: PostgreSQL externa (Supabase)
+#   - Build: esbuild via build-server-bundle.mjs (server bundle con prodDeps)
+#   - Start: node dist/index.js
+#
+# Variables de entorno requeridas (configurar en Render dashboard):
+#   - DATABASE_URL   : connection string de Supabase (con pgbouncer)
+#   - JWT_SECRET     : string aleatorio de 32+ chars
+#   - NODE_ENV       : production
+#   - CORS_ORIGINS   : * (o el dominio del frontend si lo hay)
+# =================================================================
+
+services:
+  - type: web
+    name: imbio-api
+    runtime: node
+    plan: free
+    rootDir: server
+    region: oregon  # Cambiar a la región más cercana a México (usualmente Oregon u Ohio)
+    branch: main
+    buildCommand: |
+      cd ..
+      node installer/build-server-bundle.mjs && \
+      cd server && \
+      cp -r ../installer/resources/server-bundle/* . && \
+      npx prisma generate
+    startCommand: |
+      node dist/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: info
+      - key: JWT_EXPIRES_IN
+        value: 28800  # 8 horas
+      - key: AUTO_SEED
+        value: "true"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: DATABASE_URL
+        sync: false  # Configurar manualmente en el dashboard
+      - key: JWT_SECRET
+        sync: false  # Configurar manualmente en el dashboard

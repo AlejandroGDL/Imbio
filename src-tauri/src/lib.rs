@@ -88,6 +88,12 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
         .map(|p| std::path::PathBuf::from(p).join("IMBIO").join("logs"))
     {
         let _ = std::fs::create_dir_all(&log_dir);
+
+        // Touch file: se actualiza cada vez que se llama run_setup
+        // (para confirmar que el comando sí se invocó)
+        let touch_path = log_dir.join("run_setup-timestamp.txt");
+        let _ = std::fs::write(&touch_path, format!("run_setup llamado en ts={}", chrono_like_now()));
+
         let log_path = log_dir.join("install-rust.log");
         let _ = std::fs::write(
             &log_path,
