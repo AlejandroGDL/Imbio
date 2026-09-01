@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { initConfig } from "@/lib/config";
+import { invoke } from "@tauri-apps/api/core";
 
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -17,15 +18,55 @@ import { RequisicionesPage } from "@/pages/Requisiciones";
 import { ConsumiblesPage } from "@/pages/Consumibles";
 import { ResguardosPage } from "@/pages/Resguardos";
 import { DashboardPage } from "@/pages/Dashboard";
+import SetupPage from "@/pages/Setup";
+
+type BootState = "loading" | "needs-setup" | "ready";
 
 function App() {
-  // Pre-cargar la configuración del instalador (si existe en disco)
-  // antes de renderizar. Es async pero los componentes usan la
-  // versión síncrona que devuelve el cache, y luego se actualiza.
+  const [bootState, setBootState] = useState<BootState>("loading");
+
+  // Al montar: pre-cargar config del instalador y detectar si
+  // necesitamos mostrar el Setup Wizard.
   useEffect(() => {
-    void initConfig();
+    void (async () => {
+      try {
+        // ¿Estamos dentro de Tauri? (no en el navegador)
+        const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
+        if (w.__TAURI_INTERNALS__) {
+          // Dentro de Tauri: chequear si hay config en disco
+          const needs = await invoke<boolean>("needs_setup");
+          if (needs) {
+            setBootState("needs-setup");
+            return;
+          }
+        }
+        // Cargar config normalmente (localStorage o disco)
+        await initConfig();
+        setBootState("ready");
+      } catch (err) {
+        console.error("Error en boot:", err);
+        // En caso de error, intentar continuar
+        await initConfig();
+        setBootState("ready");
+      }
+    })();
   }, []);
 
+  // Mientras carga, mostrar nada (o un spinner)
+  if (bootState === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-slate-500">Cargando...</div>
+      </div>
+    );
+  }
+
+  // Si necesita setup, mostrar el wizard
+  if (bootState === "needs-setup") {
+    return <SetupPage />;
+  }
+
+  // Boot normal
   return (
     <AuthProvider>
       <Routes>
