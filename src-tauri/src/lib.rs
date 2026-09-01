@@ -82,26 +82,26 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
 
     eprintln!("[IMBIO] Ejecutando: powershell.exe {}", args.join(" "));
 
-    // Ejecutar PowerShell en una ventana VISIBLE
-    // Usamos cmd /c start para que abra una ventana separada y visible
+    // Ejecutar PowerShell directamente con CREATE_NEW_CONSOLE para
+    // que abra una ventana visible. Esperamos al proceso para obtener
+    // el exit code real de PowerShell (no el de cmd.exe que siempre
+    // es 0 cuando usa `start /WAIT`).
     #[cfg(target_os = "windows")]
     {
-        // cmd /c start "titulo" powershell.exe -NoProfile ...
-        // "start" abre una ventana nueva y devuelve el control inmediatamente
-        // La ventana queda abierta aunque el script termine
-        let mut start_args: Vec<String> = vec![
-            "/c".to_string(),
-            "start".to_string(),
-            "IMBIO Setup".to_string(), // título de la ventana
-            "/WAIT".to_string(),       // esperar a que termine
-            "powershell.exe".to_string(),
-        ];
-        start_args.extend(args);
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
 
-        let result = Command::new("cmd.exe").args(&start_args).spawn();
+        eprintln!("[IMBIO] Ejecutando: powershell.exe {}", args.join(" "));
+
+        let result = Command::new("powershell.exe")
+            .args(&args)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn();
 
         match result {
             Ok(mut child) => {
+                // Esperar a que termine (la ventana se queda abierta
+                // porque install.ps1 tiene un pause al final)
                 match child.wait() {
                     Ok(status) => {
                         let code = status.code().unwrap_or(-1);
@@ -110,7 +110,7 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
                             exit_code: code,
                             stdout: String::new(),
                             stderr: if !status.success() {
-                                format!("PowerShell termino con codigo {}", code)
+                                format!("PowerShell termino con codigo {}. Revisa C:\\ProgramData\\IMBIO\\logs\\install.log", code)
                             } else {
                                 String::new()
                             },
@@ -120,7 +120,7 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
                         success: false,
                         exit_code: -1,
                         stdout: String::new(),
-                        stderr: format!("Error esperando cmd: {}", e),
+                        stderr: format!("Error esperando PowerShell: {}", e),
                     },
                 }
             }
@@ -128,7 +128,7 @@ fn run_setup(mode: String, server_url: Option<String>) -> SetupResult {
                 success: false,
                 exit_code: -1,
                 stdout: String::new(),
-                stderr: format!("Error ejecutando cmd: {}", e),
+                stderr: format!("Error ejecutando PowerShell: {}", e),
             },
         }
     }

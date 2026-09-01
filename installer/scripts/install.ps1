@@ -32,7 +32,6 @@ try {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     "[$timestamp] [INFO] install.ps1 iniciado (modo=$Mode, installDir=$InstallDir, scriptPath=$scriptPath)" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
 } catch {
-    # Si ni siquiera podemos crear el log, mostramos en consola
     Write-Host "⚠ No se pudo crear log en $logFile" -ForegroundColor Yellow
 }
 
@@ -44,21 +43,35 @@ Write-Host "  InstallDir: $InstallDir" -ForegroundColor Gray
 Write-Host "  Log:        $logFile" -ForegroundColor Gray
 Write-Host ""
 
-# Ahora sí, importar common.ps1
-try {
-    . (Join-Path $scriptPath "common.ps1")
-    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [INFO] common.ps1 cargado" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
-} catch {
-    $errMsg = "ERROR: No se pudo cargar common.ps1 desde $scriptPath. Detalle: $($_.Exception.Message)"
-    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
-    Write-Host "  ERROR" -ForegroundColor Red
-    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
-    Write-Host "  $errMsg" -ForegroundColor Red
-    $errMsg | Add-Content -Path $logFile -ErrorAction SilentlyContinue
+# Función local de pause (por si common.ps1 no se carga)
+function Local-Pause-Exit {
+    param([int]$ExitCode = 0)
     Write-Host ""
     Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Yellow
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
+    exit $ExitCode
+}
+
+# Ahora sí, importar common.ps1
+try {
+    . (Join-Path $scriptPath "common.ps1")
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [INFO] common.ps1 cargado OK" | Add-Content -Path $logFile -ErrorAction SilentlyContinue
+} catch {
+    $errMsg = "ERROR: No se pudo cargar common.ps1 desde $scriptPath. Detalle: $($_.Exception.Message)"
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  ERROR FATAL" -ForegroundColor Red
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  $errMsg" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Buscando en scriptPath: $scriptPath" -ForegroundColor Yellow
+    if (Test-Path $scriptPath) {
+        Write-Host "  Contenido de $scriptPath:" -ForegroundColor Yellow
+        Get-ChildItem $scriptPath | ForEach-Object { Write-Host "    - $($_.Name)" }
+    } else {
+        Write-Host "  La carpeta $scriptPath NO EXISTE" -ForegroundColor Red
+    }
+    $errMsg | Add-Content -Path $logFile -ErrorAction SilentlyContinue
+    Local-Pause-Exit 1
 }
 
 Initialize-IMBIODirectories
