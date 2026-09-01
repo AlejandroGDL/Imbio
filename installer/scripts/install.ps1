@@ -1,16 +1,9 @@
 # =================================================================
-# install.ps1 — Wrapper que decide qué hacer según el modo
+# install.ps1 — Wrapper principal del instalador IMBIO
 # =================================================================
-# Este script es el entry point que el instalador NSIS llama.
-# Su trabajo es:
-#   1. Verificar que los binarios externos (Node, PostgreSQL, nssm)
-#      estén disponibles; si no, descargarlos.
-#   2. Según el modo (server/client), llamar al script correspondiente.
-#
-# Parámetros:
-#   -Mode         "server" | "client"
-#   -InstallDir   Carpeta de instalación de IMBIO
-#   -ServerUrl    (solo cliente) URL del servidor
+# Llama a install-server.ps1 o install-client.ps1 según el modo.
+# Tiene un wrapper try/catch que captura CUALQUIER error y muestra
+# el log antes de cerrar la ventana.
 # =================================================================
 
 [CmdletBinding()]
@@ -20,18 +13,70 @@ param(
     [string]$ServerUrl
 )
 
-# Configurar consola con colores
-$Host.UI.RawUI.WindowTitle = "IMBIO Setup — Configurando ($Mode)"
+# NO usar $ErrorActionPreference = "Stop" — queremos capturar
+# TODOS los errores, no abortar al primero.
+$ErrorActionPreference = "Continue"
+$Host.UI.RawUI.WindowTitle = "IMBIO Setup - Modo: $Mode"
 
-# Importar funciones comunes
+# Importar funciones comunes (con manejo de error)
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $scriptPath "common.ps1")
+try {
+    . (Join-Path $scriptPath "common.ps1")
+} catch {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  ERROR: No se pudo cargar common.ps1" -ForegroundColor Red
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  Ruta: $scriptPath" -ForegroundColor Red
+    Write-Host "  Detalle: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Yellow
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit 1
+}
 
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-Write-Host "  IMBIO Setup — Modo: $Mode" -ForegroundColor Cyan
+Write-Host "  IMBIO Setup - Modo: $Mode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "  InstallDir: $InstallDir" -ForegroundColor Gray
 Write-Host ""
+
+Initialize-IMBIODirectories
+Write-Log "Setup iniciado (modo=$Mode, installDir=$InstallDir)"
+
+# --- 0. Descomprimir el bundle del server ---
+$bundleZip = Join-Path $InstallDir "resources\server-bundle.zip"
+$serverDir = Join-Path $InstallDir "server"
+if (Test-Path $bundleZip) {
+    if (-not (Test-Path (Join-Path $serverDir "dist\index.js"))) {
+        Write-Step "Descomprimiendo server-bundle.zip..."
+        Write-Log "Descomprimiendo server-bundle.zip"
+        try {
+            if (Test-Path $serverDir) { Remove-Item -Path $serverDir -Recurse -Force }
+            New-Item -Path $serverDir -ItemType Directory -Force | Out-Null
+            Expand-Archive -Path $bundleZip -DestinationPath $InstallDir -Force
+            $extractedDir = Join-Path $InstallDir "server-bundle"
+            if (Test-Path $extractedDir) {
+                Get-ChildItem -Path $extractedDir | ForEach-Object {
+                    Move-Item -Path $_.FullName -Destination $serverDir
+                }
+                Remove-Item -Path $extractedDir -Recurse -Force
+            }
+            Write-Ok "Bundle descomprimido en $serverDir"
+            Write-Log "Bundle descomprimido OK"
+        } catch {
+            Write-Err "Error descomprimiendo el bundle: $($_.Exception.Message)"
+            Write-Log "ERROR descomprimiendo bundle: $($_.Exception.Message)"
+            Pause-And-Exit 1
+        }
+    } else {
+        Write-Ok "Bundle ya descomprimido"
+    }
+} else {
+    Write-Warn "No se encontró server-bundle.zip"
+    Write-Log "WARN: server-bundle.zip no encontrado"
+}
 
 # --- 1. Verificar / descargar binarios externos ---
 $nodeExe = Join-Path $InstallDir "node\node.exe"
@@ -47,19 +92,28 @@ if ($Mode -eq "server") {
 
 if ($binariosFaltantes.Count -gt 0) {
     Write-Step "Descargando binarios externos: $($binariosFaltantes -join ', ')"
-    Write-Host "  (Esto puede tardar unos minutos dependiendo de tu conexión)" -ForegroundColor Gray
+    Write-Host "  (Esto puede tardar unos minutos dependiendo de tu conexion)" -ForegroundColor Gray
     Write-Host ""
 
     $downloadScript = Join-Path $scriptPath "download-binaries.ps1"
     if (-not (Test-Path $downloadScript)) {
         Write-Err "No se encontró download-binaries.ps1"
-        exit 1
+        Write-Log "ERROR: download-binaries.ps1 no encontrado"
+        Pause-And-Exit 1
     }
 
-    & $downloadScript -InstallDir $InstallDir -Components $binariosFaltantes
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Falló la descarga de binarios"
-        exit 1
+    try {
+        & $downloadScript -InstallDir $InstallDir -Components $binariosFaltantes
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Falló la descarga de binarios (exit code $LASTEXITCODE)"
+            Write-Log "ERROR: descarga de binarios falló (exit $LASTEXITCODE)"
+            Pause-And-Exit 1
+        }
+        Write-Log "Binarios descargados OK"
+    } catch {
+        Write-Err "Error descargando binarios: $($_.Exception.Message)"
+        Write-Log "ERROR descargando binarios: $($_.Exception.Message)"
+        Pause-And-Exit 1
     }
     Write-Host ""
 } else {
@@ -67,50 +121,71 @@ if ($binariosFaltantes.Count -gt 0) {
 }
 
 # --- 2. Llamar al script específico del modo ---
-switch ($Mode) {
-    "server" {
-        Write-Step "Iniciando instalación del servidor..."
-        Write-Host ""
-        & (Join-Path $scriptPath "install-server.ps1") `
-            -InstallDir $InstallDir `
-            -ServerPort 3000 `
-            -PostgresPort 5432 `
-            -RunSeed $true `
-            -SkipFirewall $false
-    }
-    "client" {
-        Write-Step "Iniciando configuración del cliente..."
-        Write-Host ""
-
-        # Si no se pasó la URL, pedirla
-        if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
-            Write-Host "  Ingresa la URL del servidor IMBIO" -ForegroundColor White
-            Write-Host "  (por ejemplo: http://192.168.0.10:3000)" -ForegroundColor Gray
+try {
+    switch ($Mode) {
+        "server" {
+            Write-Step "Iniciando instalación del servidor..."
             Write-Host ""
-            $inputUrl = Read-Host "  URL del servidor"
-            if ([string]::IsNullOrWhiteSpace($inputUrl)) {
-                Write-Err "No se proporcionó URL del servidor"
-                exit 1
-            }
-            $ServerUrl = $inputUrl
+            & (Join-Path $scriptPath "install-server.ps1") `
+                -InstallDir $InstallDir `
+                -ServerPort 3000 `
+                -PostgresPort 5432 `
+                -RunSeed $true `
+                -SkipFirewall $false
         }
+        "client" {
+            Write-Step "Iniciando configuración del cliente..."
+            Write-Host ""
 
-        & (Join-Path $scriptPath "install-client.ps1") `
-            -InstallDir $InstallDir `
-            -ServerUrl $ServerUrl
+            if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
+                Write-Host "  Ingresa la URL del servidor IMBIO" -ForegroundColor White
+                Write-Host "  (por ejemplo: http://192.168.0.10:3000)" -ForegroundColor Gray
+                Write-Host ""
+                $inputUrl = Read-Host "  URL del servidor"
+                if ([string]::IsNullOrWhiteSpace($inputUrl)) {
+                    Write-Err "No se proporcionó URL del servidor"
+                    Pause-And-Exit 1
+                }
+                $ServerUrl = $inputUrl
+            }
+
+            & (Join-Path $scriptPath "install-client.ps1") `
+                -InstallDir $InstallDir `
+                -ServerUrl $ServerUrl
+        }
+        default {
+            Write-Err "Modo desconocido: $Mode"
+            Pause-And-Exit 1
+        }
     }
-    default {
-        Write-Err "Modo desconocido: $Mode"
-        exit 1
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "La instalación falló (exit code $LASTEXITCODE)"
+        Write-Log "ERROR: instalación falló (exit $LASTEXITCODE)"
+        Pause-And-Exit $LASTEXITCODE
     }
+
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
+    Write-Host "  ✅ Configuración completada" -ForegroundColor Green
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
+    Write-Log "Setup completado exitosamente"
+} catch {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  ❌ ERROR DURANTE LA INSTALACIÓN" -ForegroundColor Red
+    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  En: $($_.ScriptStackTrace)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Log completo en:" -ForegroundColor Yellow
+    Write-Host "  C:\ProgramData\IMBIO\logs\install.log" -ForegroundColor White
+    Write-Host ""
+    Write-Log "ERROR FATAL: $($_.Exception.Message)"
+    Pause-And-Exit 1
 }
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "La instalación falló"
-    exit 1
-}
-
+# Pausa al final para que el usuario vea el resultado
 Write-Host ""
-Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  ✅ Configuración completada" -ForegroundColor Green
-Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "  Presiona cualquier tecla para cerrar esta ventana..." -ForegroundColor Cyan
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

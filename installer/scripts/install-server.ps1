@@ -41,7 +41,7 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not (Test-Administrator)) {
     Write-Err "Este script debe ejecutarse como Administrador."
     Write-Host "Clic derecho → 'Ejecutar con PowerShell como administrador'"
-    exit 1
+    Pause-And-Exit 1
 }
 
 # --- Validar InstallDir ---
@@ -50,7 +50,7 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 }
 if (-not (Test-Path $InstallDir)) {
     Write-Err "No se encontró el directorio de instalación: $InstallDir"
-    exit 1
+    Pause-And-Exit 1
 }
 
 # Carpetas internas
@@ -76,7 +76,13 @@ $missing = $prereqs.Keys | Where-Object { -not (Test-Path $prereqs[$_]) }
 if ($missing.Count -gt 0) {
     Write-Err "Faltan archivos del instalador:"
     foreach ($m in $missing) { Write-Host "    - $m ($($prereqs[$m]))" }
-    exit 1
+    Write-Host ""
+    Write-Host "  Posibles causas:" -ForegroundColor Yellow
+    Write-Host "  1. El bundle del server no se descomprimió" -ForegroundColor Gray
+    Write-Host "  2. La descarga de Node/PostgreSQL/nssm falló" -ForegroundColor Gray
+    Write-Host "  3. Antivirus bloqueó algunos archivos" -ForegroundColor Gray
+    Write-Host ""
+    Pause-And-Exit 1
 }
 Write-Ok "Todos los archivos del instalador están presentes"
 
@@ -135,7 +141,7 @@ if (-not (Test-Path (Join-Path $Script:PostgresDataDir "PG_VERSION"))) {
     & $pgInitdb @initdbArgs 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Err "initdb falló"
-        exit 1
+        Pause-And-Exit 1
     }
     Write-Ok "Cluster inicializado en: $Script:PostgresDataDir"
 
@@ -178,7 +184,7 @@ if (Test-ServiceExists $pgServiceName) {
     ) 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Err "No se pudo registrar el servicio de PostgreSQL con nssm"
-        exit 1
+        Pause-And-Exit 1
     }
     # Configurar tipo de servicio
     & $nssmExe set $pgServiceName AppDirectory $Script:PostgresDataDir 2>&1 | Out-Null
@@ -198,7 +204,7 @@ if ($pgSvc.Status -ne "Running") {
 if (-not (Wait-PortOpen -Port $PostgresPort -TimeoutSeconds 15)) {
     Write-Err "PostgreSQL no respondió en puerto $PostgresPort"
     Write-Host "    Revisa el log: $Script:LogsDir\postgresql.log"
-    exit 1
+    Pause-And-Exit 1
 }
 Write-Ok "PostgreSQL corriendo en puerto $PostgresPort"
 
@@ -225,7 +231,7 @@ $env:PGPASSWORD = ""
 if ($LASTEXITCODE -ne 0) {
     Write-Err "No se pudo conectar a PostgreSQL con el password configurado"
     Write-Host $test
-    exit 1
+    Pause-And-Exit 1
 }
 Write-Ok "Conexión a PostgreSQL verificada"
 
@@ -237,14 +243,14 @@ if (-not (Test-Path $prismaBin)) {
 }
 if (-not (Test-Path $prismaBin)) {
     Write-Err "No se encontró Prisma en el bundle del server"
-    exit 1
+    Pause-And-Exit 1
 }
 Push-Location $Script:ServerDir
 try {
     & $prismaBin migrate deploy 2>&1 | Tee-Object -Variable prismaOut | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Las migraciones de Prisma fallaron"
-        exit 1
+        Pause-And-Exit 1
     }
     Write-Ok "Migraciones aplicadas"
 } finally {
@@ -280,7 +286,7 @@ if (Test-ServiceExists $serverServiceName) {
     ) 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Err "No se pudo registrar el servicio del server"
-        exit 1
+        Pause-And-Exit 1
     }
     & $nssmExe set $serverServiceName AppDirectory $Script:ServerDir 2>&1 | Out-Null
     & $nssmExe set $serverServiceName AppEnvironmentExtra "PATH=$Script:NodeBinDir;$Script:PostgresBinDir\bin" 2>&1 | Out-Null
@@ -303,7 +309,7 @@ Start-Service -Name $serverServiceName
 if (-not (Wait-PortOpen -Port $ServerPort -TimeoutSeconds 30)) {
     Write-Err "El server no respondió en puerto $ServerPort"
     Write-Host "    Revisa el log: $Script:LogsDir\server.log"
-    exit 1
+    Pause-And-Exit 1
 }
 Write-Ok "IMBIO Server corriendo en puerto $ServerPort"
 

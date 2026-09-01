@@ -35,9 +35,14 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../installer/scripts/install-server-standalone.ps1": "resources/install-server-standalone.ps1",
+      "../installer/scripts/install.ps1": "resources/install.ps1",
+      "../installer/scripts/install-server.ps1": "resources/install-server.ps1",
+      "../installer/scripts/install-client.ps1": "resources/install-client.ps1",
       "../installer/scripts/uninstall.ps1": "resources/uninstall.ps1",
-      "../installer/scripts/diagnose.ps1": "resources/diagnose.ps1"
+      "../installer/scripts/common.ps1": "resources/common.ps1",
+      "../installer/scripts/download-binaries.ps1": "resources/download-binaries.ps1",
+      "../installer/scripts/diagnose.ps1": "resources/diagnose.ps1",
+      "../installer/resources/server-bundle.zip": "resources/server-bundle.zip"
     },
     "windows": {
       "nsis": {

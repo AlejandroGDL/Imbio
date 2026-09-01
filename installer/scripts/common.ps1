@@ -151,3 +151,12 @@ function Write-IMBIOConfig {
     Write-Ok "  serverUrl: $ServerUrl"
     Write-Ok "  mode:      $Mode"
 }
+
+# Pausa antes de cerrar (para que el usuario vea el error)
+function Pause-And-Exit {
+    param([int]$ExitCode = 0)
+    Write-Host ""
+    Write-Host "  Presiona cualquier tecla para cerrar..." -ForegroundColor Yellow
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit $ExitCode
+}
