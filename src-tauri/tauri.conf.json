@@ -35,7 +35,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../installer/scripts/install.ps1": "resources/install.ps1"
+      "../installer/scripts/install.ps1": "resources/install.ps1",
+      "../installer/resources/server-bundle.zip": "resources/server-bundle.zip"
     },
     "windows": {
       "nsis": {
